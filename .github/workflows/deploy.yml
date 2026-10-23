@@ -1,0 +1,42 @@
+name: テスト環境に反映
+# site/（本番 racecard のコミットを写したもの）を、本番と混ざらないように書き換えて GitHub Pages に出す。
+# 出馬表（races.json）は本番リポジトリから取る。JRA にはアクセスしない。
+# 定期実行は races.json を本番の最新にそろえるため（11:20・18:20 JST）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '20 2,9 * * *'
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: コミットのメールアドレスの確認
+        run: python3 stage/check_authors.py
+      - name: 本番の出馬表を取る
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/races.json" \
+            https://raw.githubusercontent.com/saboten-no-hana/racecard/main/data/races.json \
+            || echo "本番の races.json を取れなかったので、写したコミットのものを使う"
+      - name: テスト環境用に組み立てる
+        run: python3 stage/build.py site _site --races "$RUNNER_TEMP/races.json"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

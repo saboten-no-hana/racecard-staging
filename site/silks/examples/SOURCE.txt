@@ -1,0 +1,11 @@
+勝負服の標示の参考画像（手描きの勝負服の形と柄の元）
+
+出典: Wikimedia Commons「Example of Horse Racing Colours of Japan 01〜22」
+      （Wikipedia「勝負服 (競馬)」に掲載。ライセンス CC0）
+      https://commons.wikimedia.org/wiki/File:Example_of_Horse_Racing_Colours_of_Japan_01.svg ほか
+
+01 一本輪 / 02 二本輪 / 03 三本輪 / 04 山形一本輪 / 05 山形二本輪 / 06 山形三本輪 / 07 菱山形 / 08 襷 / 09 十字襷 /
+10 鋸歯形 / 11 縦縞 / 12 格子 / 13 帯 / 14 山形帯 / 15 玉霰 / 16 蛇目散 / 17 銭形散 / 18 星散 / 19 井桁絣 /
+20 ダイヤモンド / 21 元禄 / 22 うろこ
+
+ここから表示中の図形だけを取り出して silks-shapes.js を作る: python3 tools/extract_silks.py
