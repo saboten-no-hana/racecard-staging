@@ -65,8 +65,20 @@
 
 GitHub のリポジトリで **Actions → 出馬表の取得 → Run workflow**（ブランチは main）を押すと取得します。取得の仕方は once（1回だけ）・confirm（15:45 から出走確定を見張る）・umaban（10:05 から翌日の馬番を見張る）から選べます。定期実行が遅れて起動しない時は confirm を使います。変更があれば `data/` がコミットされ、数分でページに反映されます。
 
+## 結果の自動取得（結果カード用）
+
+`.github/workflows/fetch-results.yml` が `tools/fetch_results.py` を動かし、`data/results.json` を更新します（10/24〜）。
+
+- 開催日だけ動きます（`data/races.json` に今日の開催がない日は JRA にアクセスせずに終わります）
+- クラブ馬の出るレースだけ、発走の13分後に競馬場ごとの「全レースまとめ」を読み、全頭の結果がそろうまで3分おきに読み直します（発走の40分後まで）
+- 結果が取れるたびに1レースごとにコミットして push します（1時間に8回まで）
+- 07:40 に午前の回が起動して13時まで、残りがあれば午後の回を起動して18時まで。19:07 に、まだそろっていないレースだけ読み直す仕上げ
+- 1開催日のリクエスト数は45〜50回ほど。実行結果のページの要約に、リクエスト数と「発走から取得までの分数」が出ます
+- 手動で取り直す時は Actions →「結果の取得」→ Run workflow（final＝まだそろっていないレースを1回読む）
+
 ## 開発メモ
 
+- 取得は `tools/fetch_races.py`（出馬表）と `tools/fetch_results.py`（結果）。テストは `tools/test_*.py`（偽のページで動かす。JRA にはアクセスしない）
 - 画面は `index.html`（出走カード）と `result/index.html`（結果カード。`<base href="../">` でトップと同じファイルを読む）、出走カードと結果カードで共通の画像描画の部品（勝負服・配色・段組み・1行の描き方など）は `card-core.js`（外部ライブラリなし）。QRコードの生成は `qr.js`、ホーム画面用は `manifest.webmanifest`・`sw.js`（Service Worker。公開ページ＝https の時だけ登録）。ローカルでは `python3 -m http.server` で開けます
 - テスト: `python3 -m unittest discover -s tools -p 'test_*.py'`（JRA にはアクセスせず、偽の出馬表ページで取得処理を確かめます。push のたびに `.github/workflows/test.yml` が実行）
 - フォントや勝負服の画像を差し替えた時は、`sw.js` の `STATIC` の番号を上げます（保存済みのものを使い続けるため）
