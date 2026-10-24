@@ -294,10 +294,9 @@ a.inl{color:var(--accent);font-weight:700}
       <fieldset class="fld"><legend>サイズ</legend>
         <div class="seg" id="s-size">
           <label><input type="radio" name="size" value="4:5"><span>縦長</span></label>
-          <label><input type="radio" name="size" value="1:1"><span>正方形</span></label>
           <label><input type="radio" name="size" value="16:9"><span>横長</span></label>
         </div>
-        <p class="hint">縦長は頭数に合わせて高さが変わります（少ない時は正方形まで縮み、多い時は下に伸びます）。横長は 16:9 に近い形のまま、列を増やして縦横に大きくなります。正方形は大きさ固定です。</p>
+        <p class="hint">縦長は頭数に合わせて高さが変わります（少ない時は正方形まで縮み、多い時は下に伸びます）。横長は 16:9 に近い形のまま、列を増やして縦横に大きくなります。</p>
       </fieldset>
       <fieldset class="fld"><legend>並び順（日付ごと）</legend>
         <div class="seg" id="s-order">
@@ -437,7 +436,7 @@ function readCard(){ try{ const s=JSON.parse(localStorage.getItem(CARD_KEY)); re
 let CARD=readCard();
 function defaults(){
   const cs=CARD.settings||{}; /* 初めて開いた時は、出走カードのアカウント名・デザイン・サイズなどを引き継ぐ */
-  return { settings:{title:'出走結果',post:null,handle:cs.handle||'@your_account',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size||'4:5',order:cs.order||'venue',
+  return { settings:{title:'出走結果',post:null,handle:cs.handle||'@your_account',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size==='16:9'?'16:9':'4:5',order:cs.order||'venue',
     showCount:cs.showCount!==false,showTally:true,showAgeWeight:cs.showAgeWeight!==false,skipPostGuide:!!cs.skipPostGuide,custom:{...DEFAULT_CUSTOM,...(cs.custom||{})}}, horses:[] };
 }
 let state;
@@ -446,6 +445,7 @@ if(!state||!Array.isArray(state.horses)) state=defaults();
 state.settings=Object.assign(defaults().settings,state.settings||{});
 state.settings.custom={...DEFAULT_CUSTOM,...(state.settings.custom||{})};
 if(typeof state.settings.post!=='string'||!state.settings.post.trim()) state.settings.post=null;
+if(state.settings.size!=='16:9') state.settings.size='4:5'; /* 正方形は廃止（10/24）→ 縦長 */
 let saveT, pngBlob=null;
 function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{ localStorage.setItem(KEY,JSON.stringify(state)); }catch(e){ try{ localStorage.setItem(KEY,JSON.stringify({...state,settings:{...state.settings,custom:{...state.settings.custom,image:''}}})); }catch(_){} } },300); }
 const myHorses=()=>Array.isArray(CARD.myHorses)?CARD.myHorses:[];

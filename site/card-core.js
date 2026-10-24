@@ -9,7 +9,7 @@ const F = { body:IPA, num:IPA, display:IPA };
 const CLUBS = window.CLUBS || [];
 const COLORS = window.SILK_COLORS || {'白':'#ffffff'};
 const clubById = id => CLUBS.find(c=>c.id===id);
-const SIZES = {'4:5':[1080,1350],'1:1':[1200,1200],'16:9':[1600,900]};
+const SIZES = {'4:5':[1080,1350],'16:9':[1600,900]}; /* 正方形（1:1、1200×1200）は10/24に廃止（私の判断。縦長が1〜2頭で正方形まで縮むため） */
 const WD = ['日','月','火','水','木','金','土'];
 const WD_EN = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 const WAKU = {
@@ -249,7 +249,7 @@ function bandsOf(entries,cols){
 /* 画像の大きさと並べ方を決める（10/18〜）。
    縦長: 幅1080固定。行が ROW_PREF より小さくなる時は、行の大きさを保ったまま画像を縦に伸ばす（最小 4:5）
    横長: 列を左から上→下に埋め、入りきらなければ列を増やす。高さも伸ばして 16:9 に近い形を保つ（最小 1600×900）。日ごとに新しい列から始める
-   正方形: 1200×1200固定（これまでどおり行を縮める） */
+   正方形（1200×1200固定）は10/24に廃止 */
 const ROW_PREF={tall1:.135, tall2:.25, wide:118, wideColW:520};
  /* 縦長1列は幅×0.11、縦長2列は列幅×0.25、横長は行118px（列が減るなら100pxまで）・列幅520px */
 function headerTop(W0,H0,S,hs){
@@ -278,7 +278,7 @@ function flowCols(entries,cap,unit){ /* 横長用: 列の高さ cap（行の高�
   next(); return cols;
 }
 function layoutOf(hs,S,held){ /* held: 日付→その日の開催場の一覧（出馬表から。なければ null） */
-  const mode=S.size==='16:9'?'wide':S.size==='1:1'?'square':'tall';
+  const mode=S.size==='16:9'?'wide':'tall'; /* 正方形は廃止（10/24）。古い設定の '1:1' も縦長で描く */
   const [W0,H0]=SIZES[S.size]||SIZES['4:5'];
   const {ts,pad,top}=headerTop(W0,H0,S,hs), gap=pad*.6;
   const L={W:W0,H:H0,ts,pad,top,gap};
@@ -303,7 +303,7 @@ function layoutOf(hs,S,held){ /* held: 日付→その日の開催場の一覧�
     L.rowH=Math.min(avail/Math.max(...flow.map(colUnits)), L.colW*.27);
     L.flow=flow; return L;
   }
-  const cols=(mode==='wide'||n<=(mode==='tall'?5:8))?1:2; /* 縦長は5頭まで1列・6頭以上で2列（10/18〜。以前は9頭以上で2列）、正方形は9頭以上で2列 */
+  const cols=(mode==='wide'||n<=5)?1:2; /* 縦長は5頭まで1列・6頭以上で2列（10/18〜。以前は9頭以上で2列） */
   L.colW=(W0-pad*2-gap*(cols-1))/cols;
   L.bands=bandsOf(entries,cols);
   const units=L.bands.reduce((u,b)=>u+bandUnits(b),0);
@@ -321,8 +321,9 @@ function layoutOf(hs,S,held){ /* held: 日付→その日の開催場の一覧�
   return L;
 }
 const bandUnits=b=>(b.day?DAY:0)+(b.venue?VEN:0)+Math.max(...b.cols.map(colUnits));
-function splitRows(items){ /* 段の中は左→右→次の行の順に並べる（1 2 / 3 4 / 5。10/18〜。以前は左の列を上から埋めていた） */
-  return [items.filter((_,i)=>i%2===0),items.filter((_,i)=>i%2===1)];
+function splitRows(items){ /* 段の中は左の列を上から埋めてから右の列へ（1 4 / 2 5 / 3。10/24〜、私の指定。発走順に縦に読めるように）。
+     10/18〜10/24 は左→右→次の行（1 2 / 3 4 / 5）だった。頭数が奇数の時は左の列が1頭多い */
+  const k=Math.ceil(items.length/2); return [items.slice(0,k),items.slice(k)];
 }
 
 function drawVenue(ctx,x,y,w,vh,e,T){

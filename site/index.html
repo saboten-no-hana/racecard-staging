@@ -325,10 +325,9 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
       <fieldset class="fld"><legend>サイズ</legend>
         <div class="seg" id="s-size">
           <label><input type="radio" name="size" value="4:5"><span>縦長</span></label>
-          <label><input type="radio" name="size" value="1:1"><span>正方形</span></label>
           <label><input type="radio" name="size" value="16:9"><span>横長</span></label>
         </div>
-        <p class="hint">縦長は頭数に合わせて高さが変わります（少ない時は正方形まで縮み、多い時は下に伸びます）。横長は 16:9 に近い形のまま、列を増やして縦横に大きくなります。正方形は大きさ固定です。</p>
+        <p class="hint">縦長は頭数に合わせて高さが変わります（少ない時は正方形まで縮み、多い時は下に伸びます）。横長は 16:9 に近い形のまま、列を増やして縦横に大きくなります。</p>
       </fieldset>
       <fieldset class="fld"><legend>並び順（日付ごと）</legend>
         <div class="seg" id="s-order">
@@ -399,6 +398,7 @@ if(['今週末の出走予定','今週末の出資馬出走予定'].includes(sta
 if('postText' in state.settings){ const t=(state.settings.postText||'').trim(); state.settings.post = t && t!=='#一口馬主' ? (state.settings.title||'')+'\n'+t : null; delete state.settings.postText; }
 if(typeof state.settings.post!=='string'||!state.settings.post.trim()) state.settings.post=null;
 if(state.settings.theme==='snow') state.settings.theme='winter'; /* 雪は廃止（降雪時は開催中止になるため）→ 冬 */
+if(state.settings.size==='1:1') state.settings.size='4:5'; /* 正方形は廃止（10/24）→ 縦長 */
 state.myHorses = Array.isArray(state.myHorses)?state.myHorses:[];
 state.myNames = state.myNames||{};
 state.myPending = Array.isArray(state.myPending)?state.myPending:[]; /* 馬名だけで★予約中（出馬表に出たら馬IDの★へ） */
@@ -456,7 +456,7 @@ async function render(){
       return y2; };
     if(L.flow){ /* 横長: 列を左から順に上から埋める */
       L.flow.forEach((p,ci)=>drawCol(p,pad+ci*(L.colW+L.gap),top,L.colW));
-    } else { /* 縦長・正方形: 日・競馬場ごとの段。段の中は左右交互 */
+    } else { /* 縦長: 日・競馬場ごとの段。段の中は左の列を上から、次に右の列 */
       let yy=top;
       L.bands.forEach(b=>{
         if(b.day){ const dh=L.rowH*DAY; drawDay(ctx,pad,yy,W-pad*2,dh,b.day,T); yy+=dh; }
