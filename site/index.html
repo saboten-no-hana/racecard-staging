@@ -48,7 +48,7 @@
 
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6}
 .wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-header.top .wrap{padding-block:28px 18px}
+header.top .wrap{padding-block:28px 12px}
 h1{font-family:var(--f-display);font-weight:400;font-size:clamp(24px,4vw,34px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:.01em}
 .lede{margin:8px 0 0;color:var(--muted)} /* 幅の上限なし（60ch は和文で全角30字ほどになり左に寄っていた） */
 .layout{display:grid;gap:24px;grid-template-columns:minmax(0,1fr) minmax(0,520px);align-items:start;padding-block:8px 48px}
@@ -201,6 +201,11 @@ footer.site-foot .wrap{padding-block:16px 28px}
 footer.site-foot p{margin:0}
 footer.site-foot p+p{margin-top:8px}
 footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
+/* 出走カード｜結果カードのタブ（10/24〜） */
+.tabs{display:flex;gap:4px;margin-top:16px;border-bottom:1px solid var(--line)}
+.tabs a{padding:8px 18px;font-weight:700;font-size:15px;color:var(--muted);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:10px 10px 0 0;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink)}
+.tabs a[aria-current=page]{color:var(--ink);background:var(--surface);border-color:var(--line)}
 @media (prefers-reduced-motion:reduce){.chev{transition:none}}
 </style>
 </head>
@@ -210,6 +215,7 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
 <header class="top"><div class="wrap">
   <h1>出資馬出走カードメーカー</h1>
   <p class="lede">一口出資馬の出走情報を1枚の画像にまとめて、Xに投稿できる形で書き出します。今週の出走馬はクラブや馬名で絞り込んだリストから選んで追加でき、リストにない馬は手入力でも追加できます。追加した馬には★が付いてこのブラウザに保存されるので、★の馬が出走する週はまとめて追加できます。★は付け外しでき、他の端末にも引き継げます。競馬場とレース番号を表示し、枠順の発表後はその横に枠色つきの馬番も並びます。</p>
+  <nav class="tabs" aria-label="作る画像"><a href="./" aria-current="page">出走カード</a><a href="result/">結果カード</a></nav>
 </div></header>
 
 <main class="wrap layout">

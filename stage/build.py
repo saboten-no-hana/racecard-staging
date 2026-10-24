@@ -9,9 +9,10 @@ site/（本番 racecard のあるコミットの中身をそのまま写した�
 - 全ページ: noindex、タイトルに【テスト】、上部に赤い帯
 - manifest: ホーム画面に追加した時に本番と見分けられる名前
 - data/races.json: 指定があれば本番の最新に差し替える（JRA にはアクセスしない）
+- data/results.json: 本番の最新があれば差し替え、なければ stage/sample/results.json（10/24 東京の実際の結果。結果カードの確認用）
 
 書き換えが効かなかった時（本番のコードの形が変わった時）は失敗にする。
-使い方: python3 stage/build.py site _site [--races races.json]
+使い方: python3 stage/build.py site _site [--races races.json] [--results results.json]
 """
 import argparse
 import json
@@ -40,6 +41,7 @@ def main():
     ap.add_argument('src')
     ap.add_argument('out')
     ap.add_argument('--races')
+    ap.add_argument('--results')
     a = ap.parse_args()
     src, out = Path(a.src), Path(a.out)
     if out.exists():
@@ -109,9 +111,24 @@ def main():
         except ValueError:
             note = '本番の最新が読めなかったので、反映したコミットのもの'
 
+    # 6. 結果（結果カード用）
+    rnote = 'なし'
+    def okjson(f):
+        try:
+            return f and Path(f).is_file() and Path(f).stat().st_size > 0 and json.loads(Path(f).read_text(encoding='utf-8'))
+        except ValueError:
+            return None
+    sample = Path(__file__).parent / 'sample' / 'results.json'
+    if okjson(a.results):
+        shutil.copyfile(a.results, out / 'data' / 'results.json'); rnote = '本番の最新'
+    elif not (out / 'data' / 'results.json').exists() and sample.exists():
+        shutil.copyfile(sample, out / 'data' / 'results.json'); rnote = '見本（stage/sample、10/24 東京）'
+    elif (out / 'data' / 'results.json').exists():
+        rnote = '反映したコミットのもの'
+
     (out / '.nojekyll').touch()
     print(f'元のコミット: {source}')
-    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}')
+    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}、results.json は{rnote}')
 
 
 if __name__ == '__main__':

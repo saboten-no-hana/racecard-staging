@@ -1,6 +1,7 @@
 """画面側のファイルの簡単なテスト（node が必要。なければ飛ばす）
-- index.html の中のスクリプト・qr.js・sw.js・clubs.js・card-core.js の構文チェック
-- index.html が card-core.js から読み込む名前が、card-core.js にすべてあるか
+- index.html・result/index.html の中のスクリプト・qr.js・sw.js・clubs.js・card-core.js の構文チェック
+- index.html・result/index.html が card-core.js から読み込む名前が、card-core.js にすべてあるか
+- 結果カードは出走カードの保存データ（racecard.v2）に書き込まないか
 - qr.js で作った QR コードを zxing-cpp で読み取れるか（zxing-cpp・numpy がなければ飛ばす）
 """
 import json, os, re, shutil, subprocess, tempfile, unittest
@@ -24,18 +25,37 @@ class TestWeb(unittest.TestCase):
         self.assertTrue(scripts)
         for i, s in enumerate(scripts):
             self.check(s, f'index.html の <script> {i + 1}')
+        rhtml = open(os.path.join(ROOT, 'result', 'index.html'), encoding='utf-8').read()
+        for i, s in enumerate(re.findall(r'<script>(.*?)</script>', rhtml, re.S)):
+            self.check(s, f'result/index.html の <script> {i + 1}')
         for n in ('qr.js', 'sw.js', 'clubs.js', 'card-core.js'):
             self.check(open(os.path.join(ROOT, n), encoding='utf-8').read(), n)
         json.load(open(os.path.join(ROOT, 'manifest.webmanifest'), encoding='utf-8'))
 
+    def test_result_page(self):
+        """結果カード（result/）: トップと同じファイルを読む <base>、card-core.js の読み込み順、出走カードの保存データに書き込まないこと"""
+        html = open(os.path.join(ROOT, 'result', 'index.html'), encoding='utf-8').read()
+        self.assertIn('<base href="../">', html)
+        self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js"'))
+        self.assertIn("CARD_KEY='racecard.v2'", html)
+        self.assertNotRegex(html, r'setItem\(\s*CARD_KEY', '結果カードが racecard.v2 に書き込んでいる')
+        self.assertNotIn("setItem('racecard.v2'", html)
+        sw = open(os.path.join(ROOT, 'sw.js'), encoding='utf-8').read()
+        self.assertIn("'result/'", sw)
+
     def test_core_exports(self):
-        """index.html の const { … } = window.RCCore の名前が、card-core.js の window.RCCore にすべてあるか（読み込んで確かめる）"""
-        html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
+        """index.html・result/index.html の const { … } = window.RCCore の名前が、card-core.js の window.RCCore にすべてあるか（読み込んで確かめる）"""
+        for page in ('index.html', os.path.join('result', 'index.html')):
+            with self.subTest(page=page):
+                self.core_names(page)
+
+    def core_names(self, page):
+        html = open(os.path.join(ROOT, page), encoding='utf-8').read()
         self.assertIn('<script src="card-core.js"></script>', html)
         self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js"'))
         self.assertLess(html.index('src="silks-shapes.js"'), html.index('src="card-core.js"'))
         m = re.search(r'const \{([^}]*)\} = window\.RCCore;', html)
-        self.assertTrue(m, 'index.html に window.RCCore の読み込みがない')
+        self.assertTrue(m, f'{page} に window.RCCore の読み込みがない')
         need = [n.strip() for n in m.group(1).split(',') if n.strip()]
         js = ("global.window={};class P{addPath(){}};global.Path2D=P;global.DOMMatrix=class{};global.Image=class{};"
               "require(%r);require(%r);require(%r);console.log(JSON.stringify(Object.keys(window.RCCore)))") % tuple(

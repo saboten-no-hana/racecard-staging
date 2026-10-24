@@ -1,10 +1,10 @@
 /* Service Worker（ホーム画面に追加して使う時・電波が弱い時のため、2026-10-19〜）
-   - ページ本体・JS・出馬表（races.json）: ネットワーク優先（更新をすぐ反映）。つながらない時だけ保存済みのものを使う
+   - ページ本体（出走カード・結果カード）・JS・出馬表（races.json）・結果（results.json）: ネットワーク優先（更新をすぐ反映）。つながらない時だけ保存済みのものを使う
    - フォント・勝負服・アイコン: 保存済みを優先（めったに変わらない）。中身を差し替えた時は STATIC の番号を上げる
    利用者のデータ（★・入力内容）は扱わない（localStorage のまま） */
 const STATIC = 'racecard-static-v1';
 const PAGES = 'racecard-pages-v1';
-const PRECACHE_PAGES = ['./', 'index.html', 'clubs.js', 'silks-shapes.js', 'qr.js', 'card-core.js', 'manifest.webmanifest'];
+const PRECACHE_PAGES = ['./', 'index.html', 'result/', 'clubs.js', 'silks-shapes.js', 'qr.js', 'card-core.js', 'manifest.webmanifest'];  // result/ は結果カード（10/24〜）
 const PRECACHE_STATIC = ['fonts/ipaexg.ttf', 'icon.svg'];
 
 self.addEventListener('install', e => {

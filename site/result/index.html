@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<base href="../"><!-- 画像・フォント・データ・スクリプトはトップと共通（リンクもトップからの相対） -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="一口出資馬のレース結果を、着順・人気入りの1枚の画像にまとめて、Xに投稿できる形で書き出すツール">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>結果カード｜出資馬出走カードメーカー</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f5c3a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<style>
+/* 画像に使うフォント: IPAexゴシック（IPAフォントライセンスv1.0、fonts/ 参照） */
+@font-face{font-family:"IPAexGothic";src:url("fonts/ipaexg.ttf") format("truetype");font-display:swap}
+</style>
+<link rel="preload" href="fonts/ipaexg.ttf" as="font" type="font/ttf" crossorigin>
+<style>
+/* Layout: editor list (left) + sticky image preview (right); stacks preview-first on phones */
+:root{
+  --bg:#eef1ec; --surface:#ffffff; --surface-2:#f5f7f3; --ink:#16201a; --muted:#56645b;
+  --line:#d3dbd2; --accent:#1e6a45; --accent-ink:#ffffff; --gold:#9a7114; --danger:#b3261e;
+  --f-display:"Dela Gothic One","Zen Kaku Gothic New","Hiragino Sans",sans-serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",sans-serif;
+  --f-num:"Barlow Condensed","Zen Kaku Gothic New",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1411; --surface:#171e19; --surface-2:#1d2621; --ink:#e6ece7; --muted:#99a89e;
+  --line:#2d3931; --accent:#5cbc8a; --accent-ink:#06150d; --gold:#e0b85a; --danger:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1411; --surface:#171e19; --surface-2:#1d2621; --ink:#e6ece7; --muted:#99a89e;
+  --line:#2d3931; --accent:#5cbc8a; --accent-ink:#06150d; --gold:#e0b85a; --danger:#ff8a80; color-scheme:dark}
+
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.6}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top .wrap{padding-block:28px 12px}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(24px,4vw,34px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:.01em}
+.lede{margin:8px 0 0;color:var(--muted)} /* 幅の上限なし（60ch は和文で全角30字ほどになり左に寄っていた） */
+.layout{display:grid;gap:24px;grid-template-columns:minmax(0,1fr) minmax(0,520px);align-items:start;padding-block:8px 48px}
+.editor{min-width:0}
+.preview{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);display:grid;gap:12px;min-width:0}
+@media (max-width:920px){.layout{grid-template-columns:minmax(0,1fr)}.preview{position:static}}
+
+.frame{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px;display:grid;place-items:center;min-height:200px}
+.frame img{display:block;width:100%;height:auto;max-height:72vh;object-fit:contain;border-radius:6px}
+.out-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hint{font-size:13px;color:var(--muted);margin:0}
+.status{font-size:13px;color:var(--accent);min-height:1.2em}
+dialog.guide{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:18px;width:min(440px,calc(100vw - 32px));box-sizing:border-box}
+dialog.guide::backdrop{background:rgba(0,0,0,.45)}
+dialog.guide h3{margin:0 0 10px;font-size:17px}
+dialog.guide ol{margin:0 0 12px;padding-left:1.4em;display:grid;gap:6px;font-size:15px;line-height:1.55}
+dialog.guide kbd{font:inherit;font-weight:700;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--surface-2)}
+dialog.guide .note2{font-size:13px;color:var(--muted);margin:0 0 12px}
+dialog.guide .skip{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted);margin-bottom:14px}
+dialog.guide .acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+dialog.guide #tc-go{border-color:var(--danger)}
+.t-clear{display:flex;justify-content:flex-end;margin-top:8px}
+.t-find{margin-bottom:8px}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:14px}
+.panel h2,.editor-head h2{font-size:13px;letter-spacing:.12em;font-weight:700;color:var(--muted);margin:0}
+
+label.fld,fieldset.fld{display:grid;gap:4px;min-width:0;margin:0;border:0;padding:0}
+.fld>span,.fld>legend{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.04em;padding:0}
+input[type=text],input[type=date],input[type=time],input[type=number],input:not([type]),select{
+  width:100%;min-width:0;box-sizing:border-box;font:inherit;font-size:16px;color:var(--ink);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;height:40px}
+textarea{width:100%;min-width:0;box-sizing:border-box;font:inherit;font-size:16px;line-height:1.5;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;resize:vertical}
+input[type=color]{width:100%;height:40px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);box-sizing:border-box;cursor:pointer}
+input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible,.seg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg label{position:relative;cursor:pointer}
+.seg input{position:absolute;opacity:0;inset:0;cursor:pointer;margin:0}
+.seg span{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);font-size:14px;font-weight:700;user-select:none}
+.seg input:checked+span{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.checks{display:flex;flex-wrap:wrap;gap:8px 18px}
+.post-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:-4px}
+.post-tools .hint{margin:0}.post-tools .over{color:#d32f2f;font-weight:700}
+.checks label{display:flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
+.checks input{width:18px;height:18px;accent-color:var(--accent)}
+
+button,.btn{font:inherit;font-size:14px;font-weight:700;border-radius:8px;padding:8px 14px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.danger{color:var(--danger);background:transparent}
+button.ghost{background:transparent}
+#post{background:#000;border-color:#000;color:#fff}
+#post:hover{background:#222;filter:none}
+@media (prefers-color-scheme:dark){#post{border-color:#555}}
+button:hover,.btn:hover{filter:brightness(1.05)}
+
+.editor-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+.editor-head h2 b{font-family:var(--f-num);font-size:18px;color:var(--ink);letter-spacing:0;margin-left:4px}
+#list{display:grid;gap:10px}
+details.horse{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+details.horse summary{list-style:none;display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer}
+details.horse summary::-webkit-details-marker{display:none}
+.mini{width:48px;height:48px;flex:none}
+.sum{display:grid;min-width:0;flex:1}
+.sum-name{font-weight:900;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sum-race{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpill{font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
+.kpill.win{background:var(--gold);border-color:var(--gold);color:var(--surface)}
+.kpill.wait{border-color:var(--gold);color:var(--gold)}
+.chev{width:10px;height:10px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:0 4px 4px;flex:none;transition:transform .15s}
+details[open] .chev{transform:rotate(-135deg);margin-bottom:-4px}
+.hbody{display:grid;gap:12px;padding:4px 14px 16px;border-top:1px solid var(--line);padding-top:14px}
+.g{display:grid;gap:10px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g4{grid-template-columns:1.4fr 1fr .7fr 1fr}
+.g3{grid-template-columns:2fr 1fr 1fr}
+.g3b{grid-template-columns:2fr 1fr 1fr}
+.g5{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:560px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3,.g3b{grid-template-columns:repeat(2,minmax(0,1fr))}.g3>:first-child,.g3b>:first-child{grid-column:1/-1}}
+fieldset.silks{border:1px dashed var(--line);border-radius:10px;padding:10px 12px 12px;margin:0;display:grid;gap:10px;min-width:0}
+fieldset.silks legend{font-size:12px;font-weight:700;color:var(--muted);padding:0 4px}
+.photo{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.photo img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.actions{display:flex;justify-content:flex-end}
+.note{font-size:13px;color:var(--muted);margin:14px 0 0;max-width:68ch}
+.foot-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+details.silks-edit{border:1px dashed var(--line);border-radius:10px;padding:0 12px}
+details.silks-edit>summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:700;color:var(--muted)}
+details.silks-edit[open]{padding-bottom:12px;display:grid;gap:10px}
+.club-note{font-size:13px;color:var(--muted);margin:0}
+.club-note.warn{color:var(--danger)}
+.picker{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:12px;margin-bottom:22px}
+.picker-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px 12px;flex-wrap:wrap}
+.picker-head h2{font-size:13px;letter-spacing:.12em;font-weight:700;color:var(--muted);margin:0}
+.picker-head .upd{font-size:12px;color:var(--muted)}
+.picker-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+@media (max-width:560px){.picker-filters{grid-template-columns:minmax(0,1fr)}}
+#p-banners:empty{display:none}
+#p-banners{display:grid;gap:8px}
+.pstate{display:flex;gap:6px 12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-radius:10px;padding:9px 12px;font-size:14px;line-height:1.55;background:color-mix(in srgb,var(--accent) 10%,transparent);border-left:4px solid var(--accent)}
+.pstate.wait{background:color-mix(in srgb,var(--gold) 16%,transparent);border-left-color:var(--gold)}
+.pstate p{margin:0;flex:1 1 220px}.pstate b{white-space:nowrap}
+.banner{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--gold);border-radius:10px;padding:8px 12px;font-size:14px}
+.banner p{margin:0;min-width:0}
+.plist{display:grid;gap:2px;max-height:min(52vh,460px);overflow:auto;border-top:1px solid var(--line);padding-top:6px;overscroll-behavior:contain}
+.pday{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.06em;padding:8px 2px 2px;position:sticky;top:0;background:var(--surface)}
+.prow{display:grid;grid-template-columns:36px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:0}
+.prow img{width:36px;height:36px;object-fit:contain}
+.prow .pn{font-weight:900;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .pr{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.prow .pr b{color:var(--ink)}
+.star{border:0;background:transparent;padding:4px 6px;font-size:20px;line-height:1;color:var(--muted)}
+.star[aria-pressed="true"]{color:var(--gold)}
+.prow button.add{padding:6px 12px}
+.prow button.add[disabled]{opacity:.6;cursor:default}
+.pempty{font-size:13px;color:var(--muted);margin:6px 0}
+.scr{color:var(--danger);font-weight:700}
+.prow.done{opacity:.55}
+.scr-warn,.scr-note{border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;margin:0 0 10px}
+.scr-note{margin:4px 0 10px}
+.fld-st{max-width:240px}
+.kpill.scr{background:var(--danger);color:#fff;border-color:var(--danger)}
+.pend{font-weight:700;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;letter-spacing:0}
+details.transfer{border:1px dashed var(--line);border-radius:10px;padding:0 12px}
+details.transfer>summary{cursor:pointer;padding:10px 0;font-size:13px;font-weight:700;color:var(--muted)}
+details.transfer[open]{padding-bottom:12px;display:grid;gap:12px}
+.row-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row-inline input{flex:1 1 220px}
+.tqr{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:2px 0 10px}
+.tqr canvas{width:220px;height:220px;max-width:100%;image-rendering:pixelated;border-radius:6px;background:#fff}
+.tqr .hint{flex:1 1 180px;margin:0}
+.mylist{display:flex;flex-wrap:wrap;gap:6px}
+.mylist span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:2px 4px 2px 10px;font-size:13px;background:var(--surface-2)}
+.mylist button{border:0;background:transparent;padding:2px 6px;font-size:14px;color:var(--muted)}
+.tstatus{font-size:13px;color:var(--accent);min-height:1.2em;margin:0}
+.mylist small{color:var(--muted);font-size:11px}
+.bprev{display:flex;flex-wrap:wrap;gap:6px}
+.bprev label{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 10px 3px 6px;font-size:13px;background:var(--surface-2);cursor:pointer;max-width:100%}
+.bprev input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+.bprev small{color:var(--muted);font-size:11px}
+.bprev label.done{opacity:.6;cursor:default}
+.custom-box{display:grid;gap:10px;border:1px dashed var(--line);border-radius:10px;padding:12px}
+.custom-box .g3c{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.custom-box input[type=range]{width:100%;accent-color:var(--accent)}
+.bgthumb{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+footer.site-foot{border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+footer.site-foot .wrap{padding-block:16px 28px}
+footer.site-foot p{margin:0}
+footer.site-foot p+p{margin-top:8px}
+footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
+/* 出走カード｜結果カードのタブ（10/24〜） */
+.tabs{display:flex;gap:4px;margin-top:16px;border-bottom:1px solid var(--line)}
+.tabs a{padding:8px 18px;font-weight:700;font-size:15px;color:var(--muted);text-decoration:none;border:1px solid transparent;border-bottom:0;border-radius:10px 10px 0 0;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink)}
+.tabs a[aria-current=page]{color:var(--ink);background:var(--surface);border-color:var(--line)}
+/* 結果カード（10/24〜） */
+.kpill.fin{font-family:var(--f-num);font-size:13px;color:var(--ink)}
+.kpill.fin.m1{background:#d9a520;border-color:#d9a520;color:#2a1e00}.kpill.fin.m2{background:#a7b0b8;border-color:#a7b0b8;color:#1b2228}.kpill.fin.m3{background:#b8743c;border-color:#b8743c;color:#fff}
+.fres{font-weight:900;color:var(--ink);border-radius:4px;padding:0 5px}.fres.m1{background:#d9a520;color:#2a1e00}.fres.m2{background:#a7b0b8;color:#1b2228}.fres.m3{background:#b8743c;color:#fff}
+.fres.sp{color:var(--danger)}.fres.wait{font-weight:700;color:var(--muted);border:1px solid var(--line)}
+.prow{grid-template-columns:36px minmax(0,1fr) auto}
+.mystar{color:var(--gold);margin-right:4px}
+a.inl{color:var(--accent);font-weight:700}
+#list>.pempty{margin:4px 2px 0}
+.pstate p{font-size:13px}
+@media (prefers-reduced-motion:reduce){.chev{transition:none}}
+</style>
+</head>
+<body>
+
+
+<header class="top"><div class="wrap">
+  <h1>出資馬出走カードメーカー</h1>
+  <p class="lede">出資馬のレース結果を1枚の画像にまとめて、Xに投稿できる形で書き出します。今週の結果はクラブや馬名で絞り込んだリストから選んで追加でき、出走カードに入れた馬もまとめて取り込めます。着順と人気は結果が出ると自動で入ります（リストにない馬は手入力できます）。</p>
+  <nav class="tabs" aria-label="作る画像"><a href="./">出走カード</a><a href="result/" aria-current="page">結果カード</a></nav>
+</div></header>
+
+<main class="wrap layout">
+  <section class="editor" aria-label="結果の入力">
+    <section class="picker" id="picker" aria-label="今週の結果から選ぶ">
+      <div class="picker-head"><h2>今週の結果から選ぶ</h2><span class="upd" id="p-upd">結果を読み込み中…</span></div>
+      <div class="pstate" id="p-state" role="status"><p id="p-state-msg">結果は各レースの15〜20分後に載ります。</p><button type="button" id="p-reload">最新を読み込む</button></div>
+      <div id="p-banners"></div>
+      <div class="picker-filters">
+        <label class="fld"><span>クラブ</span><select id="p-club"></select></label>
+        <label class="fld"><span>馬名で探す</span><input type="text" id="p-q" placeholder="カタカナの一部でも可" autocomplete="off"></label>
+      </div>
+      <div class="checks"><label><input type="checkbox" id="p-mine">★ 登録した出資馬だけ表示</label><span class="hint" id="p-mine-n"></span></div>
+      <div class="plist" id="p-list"></div>
+      <p class="hint">★は出走カードと共通です。★の付け外し・他の端末への引き継ぎは <a href="./" class="inl">出走カード</a> で行ってください。</p>
+    </section>
+    <div class="editor-head">
+      <h2>出走馬<b id="count">0</b></h2>
+      <button class="primary" id="add" type="button">＋ 馬を追加</button>
+    </div>
+    <div id="list"></div>
+    <div class="foot-actions">
+      <button class="ghost" id="clear" type="button">すべて消す</button>
+    </div>
+  </section>
+
+  <aside class="preview" aria-label="画像プレビュー">
+    <div class="frame"><img id="out" alt="生成した出走結果の画像"></div>
+    <div class="out-actions">
+      <button id="post" type="button">X(Twitter)に投稿</button>
+      <button class="primary" id="dl" type="button">画像を保存</button>
+      <button id="copy" type="button">画像をコピー</button>
+      <span class="status" id="status" role="status"></span>
+    </div>
+    <p class="hint" id="post-hint"></p>
+    <dialog class="guide" id="post-guide" aria-labelledby="pg-h">
+      <h3 id="pg-h">Xに投稿する</h3>
+      <ol id="pg-steps"></ol>
+      <p class="note2" id="pg-note"></p>
+      <label class="skip"><input type="checkbox" id="pg-skip"> 次からこの説明を出さない</label>
+      <div class="acts"><button type="button" class="ghost" id="pg-cancel">やめる</button><button type="button" class="primary" id="pg-go"></button></div>
+    </dialog>
+    <div class="panel">
+      <h2>画像の設定</h2>
+      <div class="g g2">
+        <label class="fld"><span>タイトル</span><input id="s-title" type="text"></label>
+        <label class="fld"><span>アカウント名</span><input id="s-handle" type="text" placeholder="@your_account"></label>
+      </div>
+      <fieldset class="fld"><legend>デザイン</legend>
+        <div class="seg" id="s-theme">
+          <label><input type="radio" name="theme" value="turf"><span>芝</span></label>
+          <label><input type="radio" name="theme" value="dirt"><span>ダート</span></label>
+          <label><input type="radio" name="theme" value="night"><span>ナイター</span></label>
+          <label><input type="radio" name="theme" value="paper"><span>白</span></label>
+          <label><input type="radio" name="theme" value="gold"><span>G1</span></label>
+          <label><input type="radio" name="theme" value="sakura"><span>春</span></label>
+          <label><input type="radio" name="theme" value="summer"><span>夏</span></label>
+          <label><input type="radio" name="theme" value="autumn"><span>秋</span></label>
+          <label><input type="radio" name="theme" value="winter"><span>冬</span></label>
+          <label><input type="radio" name="theme" value="custom"><span>カスタム</span></label>
+        </div>
+      </fieldset>
+      <div class="custom-box" id="custom-box" hidden>
+        <div class="g3c">
+          <label class="fld"><span>背景色</span><input type="color" id="c-bg"></label>
+          <label class="fld"><span>アクセント色</span><input type="color" id="c-accent"></label>
+        </div>
+        <div class="photo">
+          <img class="bgthumb" id="c-thumb" alt="" hidden>
+          <label class="btn" for="c-img" id="c-img-label">背景画像を選ぶ</label>
+          <input class="vh" type="file" id="c-img" accept="image/*">
+          <button type="button" class="ghost" id="c-img-del" hidden>画像を外す</button>
+        </div>
+        <label class="fld" id="c-dim-wrap" hidden><span>画像の暗さ <b id="c-dim-val"></b></span><input type="range" id="c-dim" min="0" max="85" step="5"></label>
+        <p class="hint">背景画像は文字が読みやすいように暗くして使います。自分で撮影した写真などを使ってください。</p>
+      </div>
+      <fieldset class="fld"><legend>サイズ</legend>
+        <div class="seg" id="s-size">
+          <label><input type="radio" name="size" value="4:5"><span>縦長</span></label>
+          <label><input type="radio" name="size" value="1:1"><span>正方形</span></label>
+          <label><input type="radio" name="size" value="16:9"><span>横長</span></label>
+        </div>
+        <p class="hint">縦長は頭数に合わせて高さが変わります（少ない時は正方形まで縮み、多い時は下に伸びます）。横長は 16:9 に近い形のまま、列を増やして縦横に大きくなります。正方形は大きさ固定です。</p>
+      </fieldset>
+      <fieldset class="fld"><legend>並び順（日付ごと）</legend>
+        <div class="seg" id="s-order">
+          <label><input type="radio" name="order" value="venue"><span>競馬場別（関東→関西→第3場）</span></label>
+          <label><input type="radio" name="order" value="time"><span>発走時刻順</span></label>
+          <label><input type="radio" name="order" value="input"><span>入力順</span></label>
+        </div>
+      </fieldset>
+      <div class="checks">
+        <label><input type="checkbox" id="s-count">頭数を載せる</label>
+        <label><input type="checkbox" id="s-tally">着別度数を載せる</label>
+        <label><input type="checkbox" id="s-aw">性齢を載せる</label>
+      </div>
+      <label class="fld"><span>投稿文（「X(Twitter)に投稿」の投稿画面に入る本文。説明やハッシュタグ等）</span><textarea id="s-post" rows="4"></textarea></label>
+      <div class="post-tools"><button type="button" id="s-list">結果一覧を入れる</button><span id="s-len" class="hint" aria-live="polite"></span></div>
+      <p class="hint">書き換えるまではタイトルと同じ文が入り、タイトルに合わせて変わります。空にするとタイトルに戻ります。「結果一覧を入れる」は画像と同じ並び順で「東京11R 馬名 1着（2番人気）」の行を入れます（入れ直すと前の一覧は置き換わります）。着別度数は「1着-2着-3着-着外」の数です。</p>
+    </div>
+  </aside>
+</main>
+
+<footer class="site-foot"><div class="wrap">
+  <p>個人が作成した非公式のツールです。各クラブとは関係ありません。成績は必ず公式の発表でご確認ください。</p>
+  <p>不具合のご報告・機能改善のご要望は、X の <a href="https://x.com/saboten_no_hana" target="_blank" rel="noopener">@saboten_no_hana</a> までお寄せください。</p>
+</div></footer>
+
+<datalist id="venues">
+  <option value="札幌"><option value="函館"><option value="福島"><option value="新潟"><option value="東京">
+  <option value="中山"><option value="中京"><option value="京都"><option value="阪神"><option value="小倉">
+</datalist>
+<datalist id="finishes">
+  <option value="1"><option value="2"><option value="3"><option value="4"><option value="5"><option value="6"><option value="7"><option value="8"><option value="9">
+  <option value="10"><option value="11"><option value="12"><option value="13"><option value="14"><option value="15"><option value="16"><option value="17"><option value="18">
+  <option value="中止"><option value="失格"><option value="取消"><option value="除外">
+</datalist>
+<canvas id="cv" hidden></canvas>
+
+<script src="silks-shapes.js"></script>
+<script src="clubs.js"></script>
+<script src="card-core.js"></script>
+<script>
+(() => {
+/* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
+   保存データは racecard.result.v1。出走カードの racecard.v2 は読むだけで書き換えない（★と、出走カードに入れた馬を取り込むため） */
+const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, rangeText, loadImg } = window.RCCore;
+const COLOR_NAMES = Object.keys(COLORS);
+const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
+const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
+
+const uid = () => Math.random().toString(36).slice(2,9);
+const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const todayYmd = () => ymd(new Date());
+/* 開催週: 火曜〜翌月曜（出走カードと同じ）。返り値はその週の火曜の日付 */
+function meetWeek(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); if(!m) return ''; const d=new Date(+m[1],m[2]-1,+m[3]); d.setDate(d.getDate()-(d.getDay()+5)%7); return ymd(d); }
+
+/* ---------- 着順・人気 ---------- */
+const MEDAL={1:{bg:'#d9a520',fg:'#2a1e00'},2:{bg:'#a7b0b8',fg:'#1b2228'},3:{bg:'#b8743c',fg:'#ffffff'}};
+const NOT_RUN=new Set(['取消','除外']);       /* 出走していない（頭数・着別度数に数えない） */
+const SPECIAL=new Set(['中止','失格','取消','除外']);
+function finishOf(h){ const f=String(h.finish??'').trim(); return f || (h.status||''); }
+function finishInfo(h){ const f=finishOf(h), n=parseInt(f,10);
+  if(n>0&&String(n)===f) return {num:String(n),unit:'着',n,medal:MEDAL[n]||null};
+  if(f) return {num:f,unit:'',n:0,medal:null,special:true};
+  return {num:'–',unit:'',n:0,medal:null,pending:true}; }
+const popText=h=>{ const p=parseInt(h.pop,10); return p>0?`${p}番人気`:''; };
+const ran=h=>!NOT_RUN.has(finishOf(h));
+function tally(hs){ const t=[0,0,0,0]; let any=false;
+  hs.filter(ran).forEach(h=>{ const fi=finishInfo(h); if(fi.pending) return; any=true; if(fi.n>=1&&fi.n<=3) t[fi.n-1]++; else t[3]++; });
+  return any?t.join('-'):''; }
+
+/* ---------- 結果の1行（B案、10/23 決定） ---------- */
+function drawFinishBlock(ctx,bx,by,bw,bh,fi,T,r){
+  rr(ctx,bx,by,bw,bh,r); ctx.fillStyle=fi.medal?fi.medal.bg:T.chipBg; ctx.fill();
+  ctx.fillStyle=fi.medal?fi.medal.fg:(fi.special?'#d32f2f':T.chipFg); ctx.textBaseline='alphabetic';
+  if(fi.unit){ let ns=Math.round(bh*.62); ctx.font=`900 ${ns}px ${F.num}`; let nw=ctx.measureText(fi.num).width;
+    let us=Math.round(ns*.42); ctx.font=`900 ${us}px ${F.body}`; let uw=ctx.measureText(fi.unit).width;
+    while(nw+uw+2>bw*.9 && ns>8){ ns--; us=Math.round(ns*.42); ctx.font=`900 ${ns}px ${F.num}`; nw=ctx.measureText(fi.num).width; ctx.font=`900 ${us}px ${F.body}`; uw=ctx.measureText(fi.unit).width; }
+    const sx=bx+bw/2-(nw+uw+2)/2, base=by+bh/2+ns*.36; ctx.textAlign='left';
+    ctx.font=`900 ${ns}px ${F.num}`; ctx.fillText(fi.num,sx,base); ctx.font=`900 ${us}px ${F.body}`; ctx.fillText(fi.unit,sx+nw+2,base);
+  } else { ctx.textAlign='center'; const f=fit(ctx,fi.num,900,F.body,bh*(fi.pending?.5:.36),bw*.86); ctx.fillText(f.t,bx+bw/2,by+bh/2+f.s*.36); }
+  ctx.textAlign='left';
+}
+/* 馬名は絶対に省略しない（10/23、私の指定）: 文字を小さくし、0.72倍まで縮めても入らなければ横に詰めて描く */
+function drawNameNoCut(ctx,t,size,x,base,maxW,color){
+  let s=Math.round(size); ctx.font=`900 ${s}px ${F.body}`; let w=ctx.measureText(t).width;
+  const min=Math.round(size*.72);
+  while(w>maxW && s>min){ s--; ctx.font=`900 ${s}px ${F.body}`; w=ctx.measureText(t).width; }
+  ctx.fillStyle=color;
+  if(w<=maxW){ ctx.fillText(t,x,base); return {w}; }
+  ctx.save(); ctx.translate(x,base); ctx.scale(maxW/w,1); ctx.fillText(t,0,0); ctx.restore(); return {w:maxW};
+}
+function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
+  const fi=finishInfo(hr), pt=popText(hr), win=fi.n===1, out=!ran(hr);
+  ctx.fillStyle=T.row; rr(ctx,x,y,w,h,h*.12); ctx.fill(); ctx.strokeStyle=win?MEDAL[1].bg:T.rowLine; ctx.lineWidth=win?3:1.5; ctx.stroke();
+  const ip=h*.11, bh=h*.62, by=y+(h-bh)/2, bw=h*.5; let nx=x+ip;
+  /* レース番号ブロック（出走カードと同じ） */
+  rr(ctx,nx,by,bw,bh,h*.06); ctx.fillStyle=T.chipBg; ctx.fill(); ctx.fillStyle=T.chipFg; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  if(hr.venue){ const f=fit(ctx,hr.venue,900,F.body,bh*.24,bw*.86); ctx.fillText(f.t,nx+bw/2,by+bh*.34); }
+  if(hr.r){ let ns=Math.round(bh*.5); const num=String(hr.r), base=by+bh*.86;
+    const W2=()=>{ ctx.font=`700 ${ns}px ${F.num}`; const w2=ctx.measureText('12').width; ctx.font=`700 ${Math.round(ns*.5)}px ${F.num}`; return w2+ctx.measureText('R').width+1; };
+    while(W2()>bw*.86&&ns>8) ns--; ctx.font=`700 ${ns}px ${F.num}`; const nw=ctx.measureText(num).width; ctx.font=`700 ${Math.round(ns*.5)}px ${F.num}`; const rw=ctx.measureText('R').width;
+    const sx0=nx+bw/2-(nw+rw+1)/2; ctx.textAlign='left'; ctx.font=`700 ${ns}px ${F.num}`; ctx.fillText(num,sx0,base); ctx.font=`700 ${Math.round(ns*.5)}px ${F.num}`; ctx.fillText('R',sx0+nw+1,base); }
+  else if(!hr.venue){ ctx.font=`700 ${Math.round(bh*.5)}px ${F.num}`; ctx.fillText('–',nx+bw/2,by+bh*.68); }
+  ctx.textAlign='left'; nx+=bw;
+  /* 勝負服 */
+  const ss=h*.72, sx=nx+ip*.8, sy=y+(h-ss)/2; const simg=imgs[silksImgSrc(hr)];
+  if(out) ctx.globalAlpha=.45;
+  if(simg) drawSilksImg(ctx,simg,sx,sy,ss,T.halo); else drawSilks(ctx,sx,sy,ss,silksHex(hr),T.halo);
+  ctx.globalAlpha=1;
+  const tx=sx+ss+ip*.8; let right=x+w-ip;
+  /* 右端: 上に人気、その下に大きな着順。狭い行（2列など）は着順の枠を細くして馬名の幅を空ける */
+  const narrow=w<h*5.2; const fw=h*(narrow?.62:.78), fx=right-fw;
+  const fs=Math.round(clamp(h*.12,9,22)), fh=h*.56, fy=y+h*.34;
+  if(pt){ const f=fit(ctx,pt,700,F.body,fs,fw+ip*.6); ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText(f.t,fx+fw/2,y+h*.25); ctx.textAlign='left'; }
+  drawFinishBlock(ctx,fx,pt?fy:y+(h-fh)/2,fw,fh,fi,T,h*.06);
+  right=fx-ip*.8;
+  const tw=Math.max(40,right-tx);
+  const sA=clamp(h*.105,8,21), sB=clamp(h*.25,11,52), sC=clamp(h*.125,8,26), sD=clamp(h*.108,8,22), g=h*.035;
+  const chipH=sA*1.55; const block=chipH+g+sB+g+sC+g*.7+sD; let cy=y+(h-block)/2;
+  /* クラブ名（省略してよいのはクラブ名だけ）＋性齢 */
+  const club=clubLabel(hr); let cx=tx;
+  const aw=S.showAgeWeight!==false?(hr.sexAge||''):'';
+  ctx.font=`700 ${Math.round(sA)}px ${F.body}`; const awW=aw?ctx.measureText(aw).width+sA*.6:0;
+  if(club){ const f=fit(ctx,club,700,F.body,sA,Math.max(20,Math.min(tw*.7,tw-awW-sA*1.1))); const cw=ctx.measureText(f.t).width+sA*1.1; rr(ctx,cx,cy,cw,chipH,chipH*.25); ctx.fillStyle=T.chipBg; ctx.fill(); ctx.fillStyle=T.chipFg; ctx.fillText(f.t,cx+sA*.55,cy+chipH*.5+f.s*.36); cx+=cw+sA*.6; }
+  if(aw){ ctx.font=`700 ${Math.round(sA)}px ${F.body}`; if(cx+ctx.measureText(aw).width<=tx+tw){ ctx.fillStyle=T.fg; ctx.globalAlpha=.85; ctx.fillText(aw,cx,cy+chipH*.5+sA*.36); ctx.globalAlpha=1; } }
+  cy+=chipH+g;
+  const nm=drawNameNoCut(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,out?T.sub:T.fg);
+  if(out){ ctx.fillRect(tx,cy+sB*.86-sB*.34,nm.w,Math.max(2,sB*.07)); }
+  cy+=sB+g;
+  const c=fit(ctx,hr.raceName||'',700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
+  const ld=[(hr.surface||'')+(hr.dist?hr.dist+'m':''), hr.jockey].filter(Boolean).join('　');
+  const d=fit(ctx,ld,500,F.body,sD,tw); ctx.fillStyle=T.sub; ctx.fillText(d.t,tx,cy+sD*.86);
+}
+
+/* ---------- 保存データ ---------- */
+const KEY='racecard.result.v1', CARD_KEY='racecard.v2';
+function readCard(){ try{ const s=JSON.parse(localStorage.getItem(CARD_KEY)); return s&&typeof s==='object'?s:{}; }catch(e){ return {}; } } /* 出走カードの保存データ（読むだけ） */
+let CARD=readCard();
+function defaults(){
+  const cs=CARD.settings||{}; /* 初めて開いた時は、出走カードのアカウント名・デザイン・サイズなどを引き継ぐ */
+  return { settings:{title:'出走結果',post:null,handle:cs.handle||'@your_account',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size||'4:5',order:cs.order||'venue',
+    showCount:cs.showCount!==false,showTally:true,showAgeWeight:cs.showAgeWeight!==false,skipPostGuide:!!cs.skipPostGuide,custom:{...DEFAULT_CUSTOM,...(cs.custom||{})}}, horses:[] };
+}
+let state;
+try{ state=JSON.parse(localStorage.getItem(KEY)); }catch(e){ state=null; }
+if(!state||!Array.isArray(state.horses)) state=defaults();
+state.settings=Object.assign(defaults().settings,state.settings||{});
+state.settings.custom={...DEFAULT_CUSTOM,...(state.settings.custom||{})};
+if(typeof state.settings.post!=='string'||!state.settings.post.trim()) state.settings.post=null;
+let saveT, pngBlob=null;
+function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{ localStorage.setItem(KEY,JSON.stringify(state)); }catch(e){ try{ localStorage.setItem(KEY,JSON.stringify({...state,settings:{...state.settings,custom:{...state.settings.custom,image:''}}})); }catch(_){} } },300); }
+const myHorses=()=>Array.isArray(CARD.myHorses)?CARD.myHorses:[];
+const isMine=id=>!!id&&myHorses().includes(id);
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function md(d){ const p=parseDate(d); return p?`${p.m}/${p.d}(${WD[p.wd]})`:'日付未定'; }
+function sumRace(h){ return [md(h.date),(h.venue||'')+(h.r?h.r+'R':''),h.raceName].filter(Boolean).join(' '); }
+function finText(h){ const fi=finishInfo(h); if(fi.pending) return ''; return (fi.unit?fi.num+'着':fi.num)+(popText(h)?`（${popText(h)}）`:''); }
+
+/* ---------- 描画 ---------- */
+const OUT_SCALE=2, OUT_MAX_SIDE=4096, OUT_MAX_BYTES=4.8e6; /* 出走カードと同じ（2倍の解像度、長辺4096まで、4.8MBを超えたら縮める） */
+const toBlobP=c=>new Promise(r=>c.toBlob(r,'image/png'));
+let outUrl='', HELD=null;
+async function render(){
+  const S=state.settings, T=S.theme==='custom'?customTheme(S.custom):(THEMES[S.theme]||THEMES.turf);
+  if(S.theme==='custom'&&S.custom&&S.custom.image) await loadImg(S.custom.image);
+  const hs=state.horses;
+  const txt=[S.title,S.handle,'着番人気頭中止失格取消除外日月火水木金土日付未定出走結果（馬名）牡牝セ',...hs.flatMap(h=>[clubLabel(h),h.name,h.venue,h.raceName,h.jockey,h.surface,h.sexAge])].join('');
+  try{ await document.fonts.load(`40px "IPAexGothic"`,txt+'0123456789.–-RSATSUNMONWEDTHUFRI@_m'); }catch(e){}
+  const imgs={}; await Promise.all([...new Set(hs.map(silksImgSrc).filter(Boolean))].map(async src=>{ const i=await loadImg(src); if(i&&i.naturalWidth) imgs[src]=i; }));
+  const Sx={...S,showCount:S.showCount||S.showTally}; /* 見出しの2行目の高さを取る判定（card-core の headerTop）用 */
+  const L=layoutOf(hs,Sx,HELD), W=L.W, H=L.H, pad=L.pad, ts=L.ts;
+  const k=Math.min(OUT_SCALE,OUT_MAX_SIDE/Math.max(W,H));
+  const cv=$('#cv'); cv.width=Math.round(W*k); cv.height=Math.round(H*k); const ctx=cv.getContext('2d'); ctx.setTransform(cv.width/W,0,0,cv.height/H,0,0);
+  drawBg(ctx,W,H,T,S.theme,pad);
+  let y=pad; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  const tf=fit(ctx,S.title||'',400,F.display,ts,W-pad*2); ctx.fillStyle=T.fg; ctx.fillText(tf.t,pad,y+tf.s*.9); y+=ts*1.08;
+  const rt=rangeText(hs), n=hs.filter(ran).length;
+  /* 頭数の右に着別度数を数字だけ（例「8頭　2-1-1-4」。10/23 決定） */
+  const ct=[S.showCount&&n?`${n}頭`:'', S.showTally?tally(hs):''].filter(Boolean).join('　');
+  if(rt||ct||S.handle){ const ds=Math.round(ts*.46), by=y+ds*1.15; let cx=pad;
+    if(rt){ ctx.font=`600 ${ds}px ${F.num}`; ctx.fillStyle=T.sub; ls(ctx,ds*.05); ctx.fillText(rt,cx,by); cx+=ctx.measureText(rt).width; ls(ctx,0); cx+=ds*.9; }
+    if(ct){ if(rt){ ctx.fillStyle=T.rowLine; ctx.fillRect(cx-ds*.45-1,by-ds*.78,2,ds*.86); }
+      const f=fit(ctx,ct,700,F.body,ds,W-pad-cx); ctx.fillStyle=T.fg; ctx.fillText(f.t,cx,by); cx+=ctx.measureText(f.t).width+ds*.9; }
+    if(S.handle){ const f=fit(ctx,S.handle,700,F.body,ds*.8,Math.max(W*.18,W-pad-cx)); ctx.fillStyle=T.sub; ctx.textAlign='right'; ctx.fillText(f.t,W-pad,by); ctx.textAlign='left'; }
+    y+=ds*1.5; }
+  y+=ts*.3; const rw=W*.09; ctx.fillStyle=T.accent; ctx.fillRect(pad,y,rw,Math.max(3,ts*.07)); ctx.fillStyle=T.rowLine; ctx.fillRect(pad+rw+10,y+Math.max(3,ts*.07)/2-1,W-pad*2-rw-10,2);
+  const top=L.top, bottom=H-pad;
+  if(!hs.length){
+    ctx.font=`700 ${Math.round(ts*.45)}px ${F.body}`; ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText('出走した出資馬を追加してください',W/2,(top+bottom)/2); ctx.textAlign='left';
+  } else {
+    const drawCol=(p,x,y0,colW)=>{ let y2=y0;
+      p.forEach(e=>{ if(e.t==='day'){ const dh=L.rowH*DAY; drawDay(ctx,x,y2,colW,dh,e,T); y2+=dh; } else if(e.t==='venue'){ const vh=L.rowH*VEN; drawVenue(ctx,x,y2,colW,vh,e,T); y2+=vh; } else { drawResultRow(ctx,x,y2,colW,L.rowH,e.h,T,S,imgs); y2+=L.rowH*(1+GAP); } });
+      return y2; };
+    if(L.flow) L.flow.forEach((p,ci)=>drawCol(p,pad+ci*(L.colW+L.gap),top,L.colW));
+    else { let yy=top;
+      L.bands.forEach(b=>{
+        if(b.day){ const dh=L.rowH*DAY; drawDay(ctx,pad,yy,W-pad*2,dh,b.day,T); yy+=dh; }
+        if(b.venue){ const vh=L.rowH*VEN; drawVenue(ctx,pad,yy,W-pad*2,vh,b.venue,T); yy+=vh; }
+        yy=Math.max(yy,...b.cols.map((p,ci)=>drawCol(p,pad+ci*(L.colW+L.gap),yy,L.colW))); }); }
+  }
+  pngBlob=null; let blob=await toBlobP(cv), k2=k;
+  while(blob && blob.size>OUT_MAX_BYTES && k2>1){ k2=Math.max(1,k2*Math.sqrt(OUT_MAX_BYTES/blob.size)*.95);
+    const c2=document.createElement('canvas'); c2.width=Math.round(W*k2); c2.height=Math.round(H*k2); const x2=c2.getContext('2d'); x2.imageSmoothingQuality='high'; x2.drawImage(cv,0,0,c2.width,c2.height);
+    blob=await toBlobP(c2); }
+  if(!blob) return;
+  pngBlob=blob; const old=outUrl; outUrl=URL.createObjectURL(blob); $('#out').src=outUrl; if(old) URL.revokeObjectURL(old);
+}
+let rT, rendering=false, again=false;
+function schedule(){ clearTimeout(rT); rT=setTimeout(async()=>{ if(rendering){ again=true; return; } rendering=true; try{ await render(); }finally{ rendering=false; if(again){ again=false; schedule(); } } },140); }
+
+/* ---------- 出走馬の一覧（編集） ---------- */
+const opt=(arr,val)=>arr.map(([v,l])=>`<option value="${esc(v)}"${String(v)===String(val)?' selected':''}>${esc(l)}</option>`).join('');
+const colorOpt=val=>COLOR_NAMES.map(n=>`<option value="${n}"${n===val?' selected':''}>${n}</option>`).join('');
+function fpill(h){ const fi=finishInfo(h); if(fi.pending) return '<span class="kpill">結果待ち</span>';
+  return `<span class="kpill fin${fi.n&&fi.n<=3?' m'+fi.n:''}${fi.special?' scr':''}">${esc(fi.unit?fi.num+'着':fi.num)}</span>`; }
+function clubNote(h){
+  if(h.clubId==='other') return '<p class="club-note">勝負服は下の「勝負服を設定」で入れてください。</p>';
+  const c=clubById(h.clubId); if(!c) return '';
+  if(h.customSilks) return '<p class="club-note">勝負服：個別に設定中</p>';
+  if(!c.img && !c.silks) return '<p class="club-note warn">このクラブの勝負服はまだ登録されていません。下の「勝負服を設定」で入れてください。</p>';
+  return `<p class="club-note">勝負服：${esc(c.text||'クラブの勝負服')}</p>`;
+}
+function cardHTML(h,open){
+  const s=silksSpec(h), id=h.id;
+  const clubOpts=[['','クラブを選ぶ'],...CLUBS.map(c=>[c.id,c.name]),['other','その他（個人馬主など）']];
+  const auto=h.horseId&&POOL.some(x=>x.horseId===h.horseId&&x.date===h.date&&x.finish);
+  return `<details class="horse" data-id="${id}"${open?' open':''}>
+  <summary><canvas class="mini" width="96" height="96" aria-hidden="true"></canvas>
+    <span class="sum"><span class="sum-name"></span><span class="sum-race"></span></span><span class="kp"></span><span class="chev" aria-hidden="true"></span></summary>
+  <div class="hbody">
+    <div class="g g2">
+      <label class="fld"><span>着順</span><input type="text" id="fin-${id}" data-f="finish" list="finishes" inputmode="numeric" placeholder="1、中止 など" value="${esc(h.finish||'')}"></label>
+      <label class="fld"><span>人気</span><input type="number" id="pop-${id}" data-f="pop" min="1" max="18" inputmode="numeric" value="${esc(h.pop||'')}"></label>
+    </div>
+    ${auto?'<p class="club-note">着順・人気は結果が載ると自動で入ります（書き換えても、結果の更新で上書きされます）。</p>':''}
+    <div class="g g2">
+      <label class="fld"><span>クラブ</span><select id="club-${id}" data-f="clubId">${opt(clubOpts,h.clubId)}</select></label>
+      <label class="fld"><span>馬名</span><input type="text" id="name-${id}" data-f="name" value="${esc(h.name)}"></label>
+    </div>
+    <label class="fld"${h.clubId==='other'?'':' hidden'}><span>馬主名（画像に表示）</span><input type="text" id="owner-${id}" data-f="ownerLabel" value="${esc(h.ownerLabel)}"></label>
+    <div class="cn">${clubNote(h)}</div>
+    <div class="g g4">
+      <label class="fld"><span>日付</span><input type="date" id="date-${id}" data-f="date" value="${esc(h.date)}"></label>
+      <label class="fld"><span>競馬場</span><input type="text" id="venue-${id}" data-f="venue" list="venues" value="${esc(h.venue)}"></label>
+      <label class="fld"><span>R</span><input type="number" id="r-${id}" data-f="r" min="1" max="12" inputmode="numeric" value="${esc(h.r)}"></label>
+      <label class="fld"><span>発走</span><input type="time" id="time-${id}" data-f="time" value="${esc(h.time)}"></label>
+    </div>
+    <div class="g g3">
+      <label class="fld"><span>レース名</span><input type="text" id="race-${id}" data-f="raceName" value="${esc(h.raceName)}"></label>
+      <label class="fld"><span>コース</span><select id="surf-${id}" data-f="surface">${opt([['芝','芝'],['ダ','ダート'],['障','障害']],h.surface)}</select></label>
+      <label class="fld"><span>距離 m</span><input type="number" id="dist-${id}" data-f="dist" step="100" inputmode="numeric" value="${esc(h.dist)}"></label>
+    </div>
+    <div class="g g2">
+      <label class="fld"><span>騎手</span><input type="text" id="jockey-${id}" data-f="jockey" value="${esc(h.jockey)}"></label>
+      <label class="fld"><span>性齢</span><input type="text" id="sa-${id}" data-f="sexAge" placeholder="牡4" value="${esc(h.sexAge||'')}"></label>
+    </div>
+    <details class="silks-edit"${h.customSilks?' open':''}>
+      <summary>${clubById(h.clubId)?.img?'勝負服を自分で設定（クラブの勝負服の代わりに使う）':'勝負服を設定'}</summary>
+      <div class="g g5">
+        <label class="fld"><span>胴の色</span><select id="sb-${id}" data-s="body">${colorOpt(s.body)}</select></label>
+        <label class="fld"><span>胴の柄</span><select id="sp-${id}" data-s="pattern">${opt(BODY_PATTERNS,s.pattern)}</select></label>
+        <label class="fld"><span>柄の色</span><select id="spc-${id}" data-s="pc">${colorOpt(s.pc)}</select></label>
+        <label class="fld"><span>袖の色</span><select id="ss-${id}" data-s="sleeve">${colorOpt(s.sleeve)}</select></label>
+        <label class="fld"><span>袖の柄</span><select id="ssp-${id}" data-s="sp">${opt(SLEEVE_PATTERNS,s.sp)}</select></label>
+        <label class="fld"><span>袖柄の色</span><select id="sspc-${id}" data-s="spc">${colorOpt(s.spc)}</select></label>
+      </div>
+      ${h.customSilks && (clubById(h.clubId)?.img||clubById(h.clubId)?.silks) ? '<button type="button" class="ghost" data-act="reset-silks">クラブの勝負服に戻す</button>':''}
+    </details>
+    <div class="actions"><button type="button" class="danger" data-act="del">この馬を削除</button></div>
+  </div></details>`;
+}
+function refreshCard(card,h){
+  card.querySelector('.sum-name').textContent=h.name||'（馬名未入力）';
+  card.querySelector('.sum-race').textContent=[clubLabel(h),sumRace(h)].filter(Boolean).join(' ・ ');
+  card.querySelector('.kp').innerHTML=fpill(h);
+  const c=card.querySelector('.mini'), x=c.getContext('2d'); x.clearRect(0,0,96,96); drawSilks(x,6,6,84,silksHex(h),null);
+  const src=silksImgSrc(h); if(src) loadImg(src).then(i=>{ if(i&&i.naturalWidth&&silksImgSrc(h)===src){ x.clearRect(0,0,96,96); drawSilksImg(x,i,4,4,88,null); } });
+}
+function renderList(openId){
+  const list=$('#list'); const open=new Set([...list.querySelectorAll('details.horse[open]')].map(d=>d.dataset.id)); if(openId) open.add(openId);
+  list.innerHTML=state.horses.map(h=>cardHTML(h,open.has(h.id))).join('')||'<p class="pempty">まだ馬がいません。上の「今週の結果から選ぶ」から追加するか、「＋ 馬を追加」で手入力してください。</p>';
+  list.querySelectorAll('.horse').forEach(card=>refreshCard(card,findH(card.dataset.id)));
+  $('#count').textContent=state.horses.length;
+  renderPicker();
+}
+function rerenderCard(h){ const old=document.querySelector(`.horse[data-id="${h.id}"]`); if(!old) return; const wasOpen=old.open; const silksOpen=old.querySelector('.silks-edit')?.open;
+  const t=document.createElement('div'); t.innerHTML=cardHTML(h,wasOpen); const nc=t.firstElementChild; if(silksOpen) nc.querySelector('.silks-edit').open=true; old.replaceWith(nc); refreshCard(nc,h); }
+const findH=id=>state.horses.find(h=>h.id===id);
+const list=$('#list');
+list.addEventListener('input',e=>{ const el=e.target; const card=el.closest('.horse'); if(!card) return; const h=findH(card.dataset.id);
+  if(el.dataset.f){ if(el.dataset.f==='clubId') return; h[el.dataset.f]=el.value.trim?el.value.trim():el.value; }
+  else if(el.dataset.s){ h.customSilks={...silksSpec(h),[el.dataset.s]:el.value}; const cn=card.querySelector('.cn'); if(cn) cn.innerHTML=clubNote(h); }
+  else return;
+  refreshCard(card,h); schedule(); save(); });
+list.addEventListener('change',e=>{ const el=e.target; const card=el.closest('.horse'); if(!card) return; const h=findH(card.dataset.id);
+  if(el.dataset.f==='clubId'){ h.clubId=el.value; h.customSilks=null; rerenderCard(h); schedule(); save(); } });
+list.addEventListener('click',e=>{ const b=e.target.closest('button[data-act]'); if(!b) return; const card=b.closest('.horse'), h=findH(card.dataset.id), a=b.dataset.act;
+  if(a==='del'){ if(b.dataset.armed){ state.horses=state.horses.filter(x=>x!==h); renderList(); schedule(); save(); } else { b.dataset.armed='1'; b.textContent='もう一度押すと削除します'; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.textContent='この馬を削除'; } },3000); } }
+  if(a==='reset-silks'){ h.customSilks=null; rerenderCard(h); schedule(); save(); }
+});
+$('#add').addEventListener('click',()=>{ const last=state.horses[state.horses.length-1];
+  const h={id:uid(),name:'',clubId:last?.clubId||'',ownerLabel:'',date:last?.date||todayYmd(),venue:'',r:'',time:'',raceName:'',surface:'芝',dist:'',jockey:'',sexAge:'',weight:'',finish:'',pop:'',status:'',customSilks:null};
+  state.horses.push(h); renderList(h.id); schedule(); save();
+  const card=document.querySelector(`.horse[data-id="${h.id}"]`); card.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}); card.querySelector('[data-f="finish"]').focus({preventScroll:true}); });
+const clearBtn=$('#clear');
+clearBtn.addEventListener('click',()=>{ if(clearBtn.dataset.armed){ state.horses=[]; delete clearBtn.dataset.armed; clearBtn.textContent='すべて消す'; renderList(); schedule(); save(); } else { clearBtn.dataset.armed='1'; clearBtn.textContent='もう一度押すと全馬を消します'; setTimeout(()=>{ delete clearBtn.dataset.armed; clearBtn.textContent='すべて消す'; },3000); } });
+
+/* ---------- 画像の設定 ---------- */
+function syncSettings(){ const S=state.settings;
+  $('#s-title').value=S.title; $('#s-handle').value=S.handle; $('#s-post').value=S.post??S.title;
+  document.querySelectorAll('input[name=theme]').forEach(r=>r.checked=r.value===S.theme);
+  document.querySelectorAll('input[name=size]').forEach(r=>r.checked=r.value===S.size);
+  document.querySelectorAll('input[name=order]').forEach(r=>r.checked=r.value===S.order);
+  $('#s-count').checked=S.showCount; $('#s-tally').checked=S.showTally; $('#s-aw').checked=S.showAgeWeight!==false; showPostLen(); }
+$('#s-title').addEventListener('input',e=>{state.settings.title=e.target.value; if(state.settings.post==null) $('#s-post').value=e.target.value; schedule();save();showPostLen();});
+$('#s-handle').addEventListener('input',e=>{state.settings.handle=e.target.value;schedule();save();});
+$('#s-post').addEventListener('input',e=>{ const v=e.target.value; state.settings.post = v.trim() ? v : null; save(); showPostLen(); });
+$('#s-post').addEventListener('blur',e=>{ if(state.settings.post==null) e.target.value=state.settings.title; });
+function xLen(t){ let n=0; t=String(t||'').replace(/https?:\/\/\S+/g,()=>{ n+=23; return ''; });
+  for(const ch of t){ const c=ch.codePointAt(0); n+=(c<=0x10FF||(c>=0x2000&&c<=0x200D)||(c>=0x2010&&c<=0x201F)||(c>=0x2032&&c<=0x2037))?1:2; } return n; }
+function showPostLen(){ const n=xLen(postText()), el=$('#s-len');
+  el.textContent=n>280?`${n}／280（Xの上限を超えています。一覧や文を短くしてください）`:`${n}／280`; el.classList.toggle('over',n>280); }
+/* 結果一覧: 画像と同じ並び順で「【10/24(土)】」「東京11R 馬名 1着（2番人気）」の行。入れ直す時は前の一覧の行を消してから入れる */
+const VENUE_RE='(札幌|函館|福島|新潟|東京|中山|中京|京都|阪神|小倉|[^\\s]{0,4})';
+const LIST_LINE=[/^【\d{1,2}\/\d{1,2}\(.\)】$/, new RegExp('^'+VENUE_RE+'\\d{1,2}R\\s')];
+function resultLines(){ const S=state.settings, L=[];
+  entriesOf(state.horses.filter(h=>h.name),S.order,HELD).forEach(e=>{
+    if(e.t==='day'){ if(e.date) L.push(`【${md(e.date)}】`); return; }
+    if(e.t!=='horse') return; const h=e.h;
+    L.push(`${h.venue||''}${h.r?h.r+'R':''} ${h.name} ${finText(h)}`.trim()); });
+  return L; }
+$('#s-list').addEventListener('click',()=>{ const L=resultLines(); if(!L.length){ $('#s-len').textContent='出走馬がまだいません'; return; }
+  const lines=postText().split('\n').filter(l=>!LIST_LINE.some(r=>r.test(l.trim())));
+  while(lines.length&&!lines[lines.length-1].trim()) lines.pop();
+  let k=lines.length; while(k>0&&/^\s*#/.test(lines[k-1])) k--;
+  const out=[...lines.slice(0,k),...L,...lines.slice(k)].join('\n');
+  state.settings.post=out; $('#s-post').value=out; save(); showPostLen(); });
+document.querySelectorAll('input[name=theme]').forEach(r=>r.addEventListener('change',()=>{state.settings.theme=r.value;syncCustom();schedule();save();}));
+document.querySelectorAll('input[name=size]').forEach(r=>r.addEventListener('change',()=>{state.settings.size=r.value;schedule();save();}));
+document.querySelectorAll('input[name=order]').forEach(r=>r.addEventListener('change',()=>{state.settings.order=r.value;schedule();save();}));
+[['#s-count','showCount'],['#s-tally','showTally'],['#s-aw','showAgeWeight']].forEach(([s,k])=>$(s).addEventListener('change',e=>{state.settings[k]=e.target.checked;schedule();save();}));
+function syncCustom(){ const c=state.settings.custom, on=state.settings.theme==='custom';
+  $('#custom-box').hidden=!on; $('#c-bg').value=c.bg; $('#c-accent').value=c.accent; $('#c-dim').value=c.dim; $('#c-dim-val').textContent=c.dim+'%';
+  $('#c-thumb').hidden=!c.image; if(c.image) $('#c-thumb').src=c.image; $('#c-img-del').hidden=!c.image; $('#c-dim-wrap').hidden=!c.image;
+  $('#c-img-label').textContent=c.image?'背景画像を変える':'背景画像を選ぶ'; }
+$('#c-bg').addEventListener('input',e=>{ state.settings.custom.bg=e.target.value; schedule(); save(); });
+$('#c-accent').addEventListener('input',e=>{ state.settings.custom.accent=e.target.value; schedule(); save(); });
+$('#c-dim').addEventListener('input',e=>{ state.settings.custom.dim=+e.target.value; $('#c-dim-val').textContent=e.target.value+'%'; schedule(); save(); });
+$('#c-img').addEventListener('change',e=>{ const f=e.target.files[0]; if(!f) return; const fr=new FileReader();
+  fr.onload=()=>{ const i=new Image(); i.onload=()=>{ const m=1600, sc=Math.min(1,m/Math.max(i.width,i.height)); const c=document.createElement('canvas'); c.width=Math.round(i.width*sc); c.height=Math.round(i.height*sc); c.getContext('2d').drawImage(i,0,0,c.width,c.height);
+    state.settings.custom.image=c.toDataURL('image/jpeg',.85); syncCustom(); schedule(); save(); }; i.src=fr.result; }; fr.readAsDataURL(f); e.target.value=''; });
+$('#c-img-del').addEventListener('click',()=>{ state.settings.custom.image=''; syncCustom(); schedule(); save(); });
+
+/* ---------- 書き出し（出走カードと同じ流れ） ---------- */
+$('#copy').addEventListener('click',()=>{ const st=$('#status');
+  try{ const p=pngBlob||toBlobP($('#cv'));
+    navigator.clipboard.write([new ClipboardItem({'image/png':p})]).then(()=>{ st.textContent='コピーしました。Xの投稿画面に貼り付けできます'; },()=>{ st.textContent='このブラウザではコピーできません。「画像を保存」を使ってください'; });
+  }catch(e){ st.textContent='このブラウザではコピーできません。「画像を保存」を使ってください'; } });
+function pngName(){ const d=state.horses.map(h=>h.date).filter(Boolean).sort()[0]||'results'; return `kekka_${d}.png`; }
+function downloadPng(){ const a=document.createElement('a'); a.download=pngName(); a.href=$('#out').src; document.body.appendChild(a); a.click(); a.remove(); }
+$('#dl').addEventListener('click',downloadPng);
+function postText(){ const S=state.settings; return ((S.post!=null?S.post:S.title)||'').trim(); }
+function openIntent(){ const w=window.open('https://x.com/intent/post?text='+encodeURIComponent(postText()),'_blank'); if(w) try{ w.opener=null; }catch(e){} return w; }
+const isMobile=()=>matchMedia('(pointer: coarse)').matches;
+const isMac=/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent);
+const PASTE_KEY=isMac?'<kbd>⌘</kbd>＋<kbd>V</kbd>':'<kbd>Ctrl</kbd>＋<kbd>V</kbd>';
+$('#post-hint').innerHTML = isMobile()
+  ? '「X(Twitter)に投稿」を押すと共有メニューが開きます。<b>X</b> を選ぶと、画像と本文が入った投稿画面になります。Androidで X アプリが開くだけの時は、X アプリを一度終了してからもう一度押してください。'
+  : '「X(Twitter)に投稿」を押すと画像をコピーしてXの投稿画面を開きます。本文欄をクリックして '+PASTE_KEY+' で画像を貼り付けてください。';
+function canShareFile(){ if(!isMobile()||!navigator.canShare||!pngBlob) return false; try{ return navigator.canShare({files:[new File([pngBlob],pngName(),{type:'image/png'})]}); }catch(e){ return false; } }
+async function doShare(){ const st=$('#status');
+  try{ await navigator.share({files:[new File([pngBlob],pngName(),{type:'image/png'})],text:postText()}); st.textContent=''; }
+  catch(e){ if(!(e&&e.name==='AbortError')) st.textContent='共有メニューを開けませんでした。「画像を保存」してXアプリから添付してください'; } }
+function doIntent(mode){ const w=openIntent(), st=$('#status');
+  st.textContent = !w ? 'Xの投稿画面を開けませんでした（ポップアップがブロックされた可能性があります）'
+    : mode==='paste' ? 'Xの投稿画面を開きました。本文欄をクリックして貼り付けてください' : 'Xの投稿画面を開きました。保存した画像を添付してください'; }
+function showGuide(mode){ const dlg=$('#post-guide');
+  const steps={
+    share:['下の「共有メニューを開く」を押す','共有メニューの中から <b>X</b> を選ぶ（見当たらなければ「その他」や横スクロールで探す）','画像と本文が入った投稿画面になるので、確認して投稿'],
+    paste:['画像をコピーしました','下の「Xを開く」を押すと、本文入りの投稿画面が開きます','本文欄をクリックして '+PASTE_KEY+' で画像を貼り付け','確認して投稿'],
+    file:['このブラウザではコピーできないので、画像を保存しました','下の「Xを開く」を押すと、本文入りの投稿画面が開きます','画像ボタン（🖼）から保存した画像を添付','確認して投稿']}[mode];
+  $('#pg-steps').innerHTML=steps.map(t=>`<li>${t}</li>`).join('');
+  $('#pg-note').textContent = mode==='share' ? 'X を選んでも本文が入らない場合は、本文を手で入力してください。Androidで X アプリが開くだけで投稿画面にならない時は、X アプリを一度終了（最近使ったアプリの一覧から閉じる）してから、もう一度押してください。' : 'Xにログインしていない場合は、先にログインしてください。';
+  $('#pg-go').textContent = mode==='share' ? '共有メニューを開く' : 'Xを開く';
+  $('#pg-skip').checked=false; $('#pg-h').textContent='Xに投稿する'+(isMobile()?'(スマホ)':'(PC)');
+  dlg.dataset.mode=mode; dlg.showModal(); $('#pg-go').focus(); }
+$('#pg-cancel').addEventListener('click',()=>$('#post-guide').close());
+$('#pg-go').addEventListener('click',()=>{ const dlg=$('#post-guide'), mode=dlg.dataset.mode;
+  if($('#pg-skip').checked){ state.settings.skipPostGuide=true; save(); }
+  dlg.close(); if(mode==='share') doShare(); else doIntent(mode); });
+$('#post').addEventListener('click',async()=>{ const st=$('#status'); st.textContent='';
+  if(!$('#out').src||!pngBlob){ st.textContent='画像の準備中です。少し待ってからもう一度押してください'; return; }
+  const skip=state.settings.skipPostGuide;
+  if(canShareFile()){ if(skip) doShare(); else showGuide('share'); return; }
+  let mode='paste';
+  try{ await navigator.clipboard.write([new ClipboardItem({'image/png':pngBlob})]); }catch(e){ mode='file'; downloadPng(); }
+  if(skip) doIntent(mode); else showGuide(mode); });
+
+/* ---------- 今週の結果（data/results.json と data/races.json） ---------- */
+/* 一覧は「結果の載った馬」と「今日までに走る（走った）クラブ馬」を合わせたもの。結果がまだの馬は「結果待ち」。
+   いちばん新しい開催週の分だけを出す（results.json に前の週の結果が残っている時のため） */
+let POOL=[], RESU=null;
+function raceLabel(x){
+  if(x.grade) return `${x.raceName}（${x.grade}）`;
+  const c=x.cls||''; if(!c||c==='新馬'||c==='未勝利'||String(x.raceName).includes(c)) return x.raceName;
+  return `${x.raceName}（${c==='オープン'?'OP':c}）`; }
+function fromData(x){ return {id:uid(),horseId:x.horseId,name:x.name,clubId:x.clubId,ownerLabel:'',date:x.date,venue:x.venue,r:String(x.r),time:x.time||'',
+  raceName:raceLabel(x),surface:x.surface||'芝',dist:String(x.dist||''),jockey:x.jockey||'',sexAge:x.sexAge||'',weight:x.weight||'',
+  finish:x.finish||'',pop:x.pop?String(x.pop):'',status:x.status||'',customSilks:null}; }
+const keyOf=x=>x.horseId+'|'+x.date;
+const inList=x=>state.horses.some(h=>h.horseId&&h.horseId===x.horseId&&h.date===x.date);
+async function getJson(u){ try{ const r=await fetch(u,{cache:'no-cache'}); return r.ok?await r.json():null; }catch(e){ return null; } }
+async function loadData(){
+  const U=$('#p-upd'); const [res,races]=await Promise.all([getJson('data/results.json'),getJson('data/races.json')]);
+  RESU=res; const m=new Map(), today=todayYmd(); HELD={};
+  ((races&&races.horses)||[]).filter(x=>x.date<=today).forEach(x=>m.set(keyOf(x),{...x,finish:'',pop:''}));
+  ((res&&res.horses)||[]).forEach(x=>m.set(keyOf(x),{...(m.get(keyOf(x))||{}),...x}));
+  [...((races&&races.days)||[]),...((res&&res.days)||[])].forEach(d=>HELD[d.date]=d.venues);
+  let all=[...m.values()];
+  const wk=all.reduce((a,x)=>{ const w=meetWeek(x.date); return w>a?w:a; },'');
+  POOL=all.filter(x=>meetWeek(x.date)===wk);
+  if(res&&res.updated){ const t=new Date(res.updated); U.textContent=`結果 ${t.getMonth()+1}/${t.getDate()} ${pad2(t.getHours())}:${pad2(t.getMinutes())} 更新`; }
+  else U.textContent=POOL.length?'結果はまだありません':'';
+  const counts={}; POOL.forEach(x=>counts[x.clubId]=(counts[x.clubId]||0)+1);
+  const cur=$('#p-club').value;
+  $('#p-club').innerHTML=`<option value="">すべてのクラブ（${POOL.length}頭）</option>`+CLUBS.filter(c=>counts[c.id]).map(c=>`<option value="${c.id}">${esc(c.name)}（${counts[c.id]}頭）</option>`).join('');
+  if(cur&&counts[cur]) $('#p-club').value=cur;
+  const n=syncFromData(); if(n){ renderList(); save(); }
+  renderPicker(); schedule();
+  if(!races&&!res) $('#p-list').innerHTML='<p class="pempty">今週の結果のデータを読み込めませんでした。「＋ 馬を追加」から手入力できます。</p>';
+}
+/* 追加済みの馬を最新の結果で更新（着順・人気。取消・除外も） */
+function syncFromData(){ let n=0;
+  state.horses.forEach(h=>{ if(!h.horseId) return; const x=POOL.find(y=>y.horseId===h.horseId&&y.date===h.date); if(!x) return; let ch=false;
+    if(x.finish&&(h.finish!==x.finish||String(h.pop||'')!==String(x.pop||''))){ h.finish=x.finish; h.pop=x.pop?String(x.pop):''; ch=true; }
+    if((x.status||'')!==(h.status||'')){ h.status=x.status||''; ch=true; }
+    ['jockey','sexAge'].forEach(k=>{ if(x[k]&&h[k]!==x[k]){ h[k]=x[k]; ch=true; } });
+    if(ch) n++; });
+  return n; }
+function addFromData(xs){ if(!xs.length) return; xs.forEach(x=>{ if(!inList(x)) state.horses.push(fromData(x)); }); renderList(); schedule(); save(); }
+/* 出走カードに入れた馬（racecard.v2 の horses）のうち、この開催週の馬。結果があれば着順も入れる */
+function cardHorses(){ const wk=POOL.length?meetWeek(POOL[0].date):meetWeek(todayYmd()), today=todayYmd();
+  return (Array.isArray(CARD.horses)?CARD.horses:[]).filter(h=>h.name&&h.date&&h.date<=today&&meetWeek(h.date)===wk&&!state.horses.some(x=>(h.horseId&&x.horseId===h.horseId&&x.date===h.date)||(!h.horseId&&x.name===h.name&&x.date===h.date))); }
+function importCard(){ const hs=cardHorses(); if(!hs.length) return;
+  hs.forEach(h=>{ const x=h.horseId&&POOL.find(y=>y.horseId===h.horseId&&y.date===h.date);
+    state.horses.push({id:uid(),horseId:h.horseId||'',name:h.name,clubId:h.clubId||'',ownerLabel:h.ownerLabel||'',date:h.date,venue:h.venue||'',r:String(h.r||''),time:h.time||'',
+      raceName:h.raceName||'',surface:h.surface||'芝',dist:String(h.dist||''),jockey:h.jockey||'',sexAge:h.sexAge||'',weight:h.weight||'',
+      finish:x&&x.finish||'',pop:x&&x.pop?String(x.pop):'',status:(x&&x.status)||h.status||'',customSilks:h.customSilks||null}); });
+  renderList(); schedule(); save(); }
+const isOld=h=>!!h.date&&meetWeek(h.date)<(POOL.length?meetWeek(POOL[0].date):meetWeek(todayYmd()));
+function renderPicker(){
+  const L=$('#p-list'), B=$('#p-banners');
+  const club=$('#p-club').value, q=($('#p-q').value||'').trim(), mine=$('#p-mine').checked;
+  const kata=s=>s.replace(/[ぁ-ゖ]/g,c=>String.fromCharCode(c.charCodeAt(0)+0x60));
+  let xs=POOL.filter(x=>(!club||x.clubId===club)&&(!q||x.name.includes(kata(q)))&&(!mine||isMine(x.horseId)));
+  const rk={}; const rank=x=>{ if(!rk[x.date]) rk[x.date]=venueRanker((HELD&&HELD[x.date])||[]); return rk[x.date](x.venue); };
+  xs=xs.slice().sort((a,b)=>a.date.localeCompare(b.date)||rank(a)-rank(b)||a.r-b.r||(+a.umaban||99)-(+b.umaban||99));
+  let html='', cur='';
+  xs.forEach(x=>{
+    const g=x.date+'|'+x.venue;
+    if(g!==cur){ cur=g; html+=`<div class="pday">${esc(md(x.date))}　${esc(x.venue)}</div>`; }
+    const c=clubById(x.clubId), added=inList(x), fi=finishInfo(x);
+    const fin=fi.pending?'<span class="fres wait">結果待ち</span>':`<span class="fres${fi.n&&fi.n<=3?' m'+fi.n:''}${fi.special?' sp':''}">${esc(fi.unit?fi.num+'着':fi.num)}</span>`+(popText(x)?` ${esc(popText(x))}`:'');
+    html+=`<div class="prow" data-k="${esc(keyOf(x))}">${c&&c.img?`<img src="${esc(c.img)}" alt="">`:'<span></span>'}
+      <div style="min-width:0"><div class="pn">${isMine(x.horseId)?'<span class="mystar" title="★の出資馬">★</span>':''}${esc(x.name)}</div><div class="pr"><b>${x.r}R</b>　${fin}　${esc(raceLabel(x))}　${esc(c?c.name:'')}</div></div>
+      <button type="button" class="add" data-act="add"${added?' disabled':''}>${added?'追加済み':'追加'}</button></div>`;
+  });
+  L.innerHTML=html||(POOL.length?'<p class="pempty">条件に合う馬はいません。</p>':'<p class="pempty">今週の結果はまだありません。</p>');
+  $('#p-mine-n').textContent=myHorses().length?'':'（★は出走カードで付けられます）';
+  const mineNot=POOL.filter(x=>isMine(x.horseId)&&!inList(x)&&!x.status), fromCard=cardHorses(), old=state.horses.filter(isOld);
+  let b='';
+  if(mineNot.length) b+=`<div class="banner"><p>★の出資馬が今週 <b>${mineNot.length}頭</b> 出走しました：${esc(mineNot.map(x=>x.name).join('、'))}</p><button type="button" class="primary" data-act="add-mine">まとめて追加</button></div>`;
+  if(fromCard.length) b+=`<div class="banner"><p>出走カードに入れた馬が <b>${fromCard.length}頭</b> います：${esc(fromCard.map(h=>h.name).join('、'))}</p><button type="button" class="primary" data-act="import-card">取り込む</button></div>`;
+  if(old.length) b+=`<div class="banner"><p>先週までの馬が <b>${old.length}頭</b> 残っています。</p><button type="button" data-act="del-old">消す</button></div>`;
+  B.innerHTML=b;
+}
+$('#picker').addEventListener('click',e=>{ const b=e.target.closest('button[data-act]'); if(!b) return; const a=b.dataset.act;
+  const row=b.closest('.prow'), x=row&&POOL.find(y=>keyOf(y)===row.dataset.k);
+  if(a==='add'&&x) addFromData([x]);
+  if(a==='add-mine') addFromData(POOL.filter(x=>isMine(x.horseId)&&!inList(x)&&!x.status));
+  if(a==='import-card') importCard();
+  if(a==='del-old'){ state.horses=state.horses.filter(h=>!isOld(h)); renderList(); schedule(); save(); } });
+['#p-club','#p-q','#p-mine'].forEach(s=>$(s).addEventListener(s==='#p-q'?'input':'change',renderPicker));
+$('#p-reload').addEventListener('click',async e=>{ const b=e.target; b.disabled=true; b.textContent='読み込み中…'; await loadData(); b.disabled=false; b.textContent='最新を読み込む'; });
+/* 開催日にページを開いたままにしている時は、5分ごとに結果を読み直す（画面が見えている時だけ） */
+setInterval(()=>{ if(document.visibilityState==='visible'&&POOL.some(x=>x.date===todayYmd()&&!x.finish)) loadData(); },5*60e3);
+/* 出走カードで★を付け外しして戻ってきた時に読み直す */
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ CARD=readCard(); renderPicker(); } });
+window.addEventListener('pageshow',e=>{ if(e.persisted){ CARD=readCard(); renderPicker(); } });
+
+syncSettings(); syncCustom(); renderList(); (document.fonts?document.fonts.ready:Promise.resolve()).then(schedule); loadData();
+if('serviceWorker' in navigator&&location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+</script>
+
+</body>
+</html>

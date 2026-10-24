@@ -1,6 +1,6 @@
 name: テスト環境に反映
 # site/（本番 racecard のコミットを写したもの）を、本番と混ざらないように書き換えて GitHub Pages に出す。
-# 出馬表（races.json）は本番リポジトリから取る。JRA にはアクセスしない。
+# 出馬表（races.json）・結果（results.json）は本番リポジトリから取る（結果がまだなければ stage/sample の見本）。JRA にはアクセスしない。
 # 定期実行は races.json を本番の最新にそろえるため（11:20・18:20 JST）。
 on:
   push:
@@ -32,8 +32,11 @@ jobs:
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/races.json" \
             https://raw.githubusercontent.com/saboten-no-hana/racecard/main/data/races.json \
             || echo "本番の races.json を取れなかったので、写したコミットのものを使う"
+          curl -fsSL --retry 2 -o "$RUNNER_TEMP/results.json" \
+            https://raw.githubusercontent.com/saboten-no-hana/racecard/main/data/results.json \
+            || { echo "本番に results.json がまだないので、見本を使う"; rm -f "$RUNNER_TEMP/results.json"; }
       - name: テスト環境用に組み立てる
-        run: python3 stage/build.py site _site --races "$RUNNER_TEMP/races.json"
+        run: python3 stage/build.py site _site --races "$RUNNER_TEMP/races.json" --results "$RUNNER_TEMP/results.json"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
