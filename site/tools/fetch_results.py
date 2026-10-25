@@ -121,6 +121,7 @@ class Run:
         self.dirty = False
         self.done_at = {}                 # (場, R) → 発走から何分で取れたか
         self.notes = []
+        self.target = None                # (対象の日, クラブ馬の出るレース数, 取得済み)
         self.kai_of = {}                  # 場 → 開催のページ（全レースまとめのリンクがまだなかった時に読み直す）
 
     # ---- データ
@@ -269,11 +270,13 @@ class Run:
         self.load(today)
         races = self.races()
         if not races:
-            self.log('今日はクラブ馬の出るレースがない（JRA にはアクセスしない）')
+            self.log(f'{today}: クラブ馬の出るレースがない（JRA にはアクセスしない）')
+            self.target = (today, 0, 0)
             self.flush('結果を整理')
             return {'pending': 0}
         pending = {k: v for k, v in races.items() if not self.complete(v)}
-        self.log(f'今日のクラブ馬の出るレース {len(races)}（まだ {len(pending)}）')
+        self.log(f'{today}: クラブ馬の出るレース {len(races)}（まだ {len(pending)}）')
+        self.target = (today, len(races), len(races) - len(pending))
         if not pending:
             self.flush('結果を整理')
             return {'pending': 0}
@@ -366,6 +369,9 @@ def main():
     if arg('--pending-flag') and st['pending'] > 0:
         open(arg('--pending-flag'), 'w').write(str(st['pending']))
     mins = '、'.join(f'{v}{r}R {m}分' for (v, r), m in sorted(run.done_at.items(), key=lambda kv: (CODE.get(kv[0][0], '99'), kv[0][1])))
+    tg = getattr(run, 'target', None)
+    if tg:   # 何もしなかった時に「なぜ0か」が分かるように（10/26、日付を指定した取り直しで既にそろっていた時に0と出て分かりにくかった）
+        print(f'::notice::対象の日 {tg[0]}／クラブ馬の出るレース {tg[1]}（取得済み {tg[2]}）' + ('／すべて取得済みなので JRA にはアクセスしていない' if tg[1] and tg[1] == tg[2] else ''), flush=True)
     print(f'::notice::リクエスト数 {f.count}／取得したレース {len(run.done_at)}／残り {st["pending"]}', flush=True)
     if mins:
         print(f'::notice::発走から取得までの分数: {mins}', flush=True)
