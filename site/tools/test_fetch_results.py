@@ -110,6 +110,7 @@ class TestFetchResults(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.p = [mock.patch.object(fx, 'DATA', self.tmp.name), mock.patch.object(fx, 'RACES', os.path.join(self.tmp.name, 'races.json')),
                   mock.patch.object(fx, 'RESULTS', os.path.join(self.tmp.name, 'results.json'))]
+        self.p.append(mock.patch.object(fx, 'START_AFTER', 13))   # 下の時刻は13分後から読む前提で書いている（本番は18分後。test_start_after）
         for p in self.p:
             p.start()
         self.logs = []
@@ -234,6 +235,16 @@ class TestFetchResults(unittest.TestCase):
         self.assertEqual([x for x in j.requests if not x.startswith('pw01sli')][0][9:11], '08')
         self.assertEqual(len(j.requests), 3)   # トップ・京都の開催・京都のまとめ
         self.assertEqual({h['horseId']: h['finish'] for h in self.results()['horses']}, {'2024000001': '1', '2024000002': '12'})
+
+    def test_start_after(self):
+        """本番の設定（発走18分後から）では、13分後・16分後の読み直しをせずに1回で取れる"""
+        self.p[-1].stop(); self.p.pop()
+        self.assertEqual(fx.START_AFTER, 18)
+        self.write_races([horse('04', 1, '2024000041', '09:40')])
+        c = FakeClock('08:00')
+        j = FakeJRA(c, {('04', 1): {'time': '09:40', 'horses': ['2024000041'], 'finish': {'2024000041': '2'}, 'late': 4}})   # 9:54 上位5頭、9:57 全頭
+        self.assertEqual(self.run_(c, j, until=c.now().replace(hour=13)), {'pending': 0})
+        self.assertEqual(sum(1 for x in j.requests if x.startswith('pw01ses')), 1)   # 9:58 に1回だけ
 
     def test_parse_partial_not_done(self):
         """上位5頭だけの段階の1着（タイムはあるが推定上りが空）は、そろったとみなさない"""
