@@ -9,7 +9,7 @@ site/（本番 racecard のあるコミットの中身をそのまま写した�
 - 全ページ: noindex、タイトルに【テスト】、上部に赤い帯
 - manifest: ホーム画面に追加した時に本番と見分けられる名前
 - data/races.json: 指定があれば本番の最新に差し替える（JRA にはアクセスしない）
-- data/results.json: 本番の最新があれば差し替え、なければ stage/sample/results.json（10/24 東京の実際の結果。結果カードの確認用）
+- data/results.json: 本番の最新があれば差し替え、なければ stage/sample/results.json（実際の結果。10/25 日曜の全場・クラブ馬96頭。結果カードの確認用）
 
 書き換えが効かなかった時（本番のコードの形が変わった時）は失敗にする。
 使い方: python3 stage/build.py site _site [--races races.json] [--results results.json]
@@ -122,7 +122,7 @@ def main():
     if okjson(a.results):
         shutil.copyfile(a.results, out / 'data' / 'results.json'); rnote = '本番の最新'
     elif not (out / 'data' / 'results.json').exists() and sample.exists():
-        shutil.copyfile(sample, out / 'data' / 'results.json'); rnote = '見本（stage/sample、10/24 東京）'
+        shutil.copyfile(sample, out / 'data' / 'results.json'); rnote = '見本（stage/sample）'
     elif (out / 'data' / 'results.json').exists():
         rnote = '反映したコミットのもの'
 

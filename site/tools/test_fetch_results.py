@@ -32,13 +32,19 @@ class FakeJRA:
     def __init__(self, clock, races, ses_from=None):
         self.clock, self.races, self.requests, self.memo, self.count = clock, races, [], {}, 0
         self.ses_from = ses_from     # この時刻より前は開催のページに全レースまとめのリンクを出さない
+        self.top_all = False         # True なら結果トップに最初から全部の開催を載せる
 
     def get(self, cname, post=False, path=''):
         self.count += 1
         self.requests.append(cname)
         ymd8 = DAY.replace('-', '')
-        if cname == fx.TOP:
-            codes = sorted({c for c, _ in self.races})
+        if cname == fx.TOP:   # 本物と同じく、その場のレースが1つ終わってから（発走10分後から）開催が載る
+            first = {}
+            for (c, _), race in self.races.items():
+                h, m = map(int, race['time'].split(':'))
+                t = self.clock.now().replace(hour=h, minute=m, second=0) + timedelta(minutes=10)
+                first[c] = min(first.get(c, t), t)
+            codes = sorted(c for c, t in first.items() if self.top_all or self.clock.now() >= t)
             return ''.join(f"<a onclick=\"return doAction('/JRADB/accessS.html', 'pw01srl00{c}20260408{ymd8}/A{i}');\">開催</a>" for i, c in enumerate(codes)) + \
                 "<a onclick=\"return doAction('/JRADB/accessS.html', 'pw01srl10052026040720261018/C0');\">先週</a>"
         if cname.startswith('pw01srl'):
@@ -151,7 +157,7 @@ class TestFetchResults(unittest.TestCase):
         self.assertEqual(res['2024000004']['raceName'], 'テスト特別')   # レースの情報は races.json から
         self.assertEqual(res['2024000001']['runners'], 14)
         # トップ1・開催2（東京・京都）・まとめ: 東京1R 1回、京都2R 1回、東京5R は 12:38 に未掲載 → 12:41 に取得で2回
-        self.assertEqual(j.requests.count(fx.TOP), 1)
+        self.assertEqual(j.requests.count(fx.TOP), 2)   # 10:18 は東京だけ載っている → 京都は 10:38 に読み直して見つける（10/25 の試しで分かった）
         self.assertEqual(sum(1 for x in j.requests if x.startswith('pw01srl')), 2)
         self.assertEqual(sum(1 for x in j.requests if x.startswith('pw01ses')), 4)
         self.assertEqual([p[0] for p in pushed], ['10:18', '10:38', '12:41'])   # 1レースごとに push

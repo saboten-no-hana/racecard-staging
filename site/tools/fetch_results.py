@@ -200,7 +200,7 @@ class Run:
         for v in venues:
             c = next((k for k in kai if k[9:11] == CODE.get(v)), None)
             if not c:
-                self.notes.append(f'{v}: 結果トップに今日の開催がない')
+                ses[v] = None   # その場のレースがまだ1つも終わっていないと、結果トップに載っていない（10/25 確認）→ 後で読み直す
                 continue
             page = self.f.get(c, post=True, path=PATH)
             s = [x for x in s_links(page, 'pw01ses') if x.split('/')[0].endswith(ymd8)]
@@ -214,11 +214,18 @@ class Run:
     def read(self, v, ses, races):
         """場 v の全レースまとめを1回読み、クラブ馬の結果を取り込む。新しくそろったレースの一覧を返す"""
         if not ses.get(v):
+            ymd8 = self.clock.now().strftime('%Y%m%d')
             c = self.kai_of.get(v)
+            if not c:   # 結果トップに まだ載っていなかった場 → トップを読み直す
+                self.f.memo = {}
+                top = self.f.get(TOP, post=True, path=PATH)
+                c = next((k for k in s_links(top, 'pw01srl') if k.split('/')[0].endswith(ymd8) and k[9:11] == CODE.get(v)), None)
+                if c:
+                    self.kai_of[v] = c
             if c:
                 self.f.memo = {}
                 page = self.f.get(c, post=True, path=PATH)
-                s = s_links(page, 'pw01ses')
+                s = [x for x in s_links(page, 'pw01ses') if x.split('/')[0].endswith(ymd8)]
                 ses[v] = s[0] if s else None
             if not ses.get(v):
                 return []
