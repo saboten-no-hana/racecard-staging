@@ -42,7 +42,7 @@ class FakeJRA:
             first = {}
             for (c, _), race in self.races.items():
                 h, m = map(int, race['time'].split(':'))
-                t = self.clock.now().replace(hour=h, minute=m, second=0) + timedelta(minutes=10)
+                t = datetime(2026, 10, 24, h, m, tzinfo=JST) + timedelta(minutes=10)
                 first[c] = min(first.get(c, t), t)
             codes = sorted(c for c, t in first.items() if self.top_all or self.clock.now() >= t)
             return ''.join(f"<a onclick=\"return doAction('/JRADB/accessS.html', 'pw01srl00{c}20260408{ymd8}/A{i}');\">開催</a>" for i, c in enumerate(codes)) + \
@@ -63,7 +63,7 @@ class FakeJRA:
             if c != code:
                 continue
             h, m = map(int, race['time'].split(':'))
-            post = now.replace(hour=h, minute=m, second=0) + timedelta(minutes=race.get('late', 0))
+            post = datetime(2026, 10, 24, h, m, tzinfo=JST) + timedelta(minutes=race.get('late', 0))   # レースは DAY（10/24）
             if now < post + timedelta(minutes=10):
                 continue
             full = now >= post + timedelta(minutes=13)
@@ -245,6 +245,23 @@ class TestFetchResults(unittest.TestCase):
         j = FakeJRA(c, {('04', 1): {'time': '09:40', 'horses': ['2024000041'], 'finish': {'2024000041': '2'}, 'late': 4}})   # 9:54 上位5頭、9:57 全頭
         self.assertEqual(self.run_(c, j, until=c.now().replace(hour=13)), {'pending': 0})
         self.assertEqual(sum(1 for x in j.requests if x.startswith('pw01ses')), 1)   # 9:58 に1回だけ
+
+    def test_final_with_date(self):
+        """日付を指定した仕上げ・日付をまたいで動いた仕上げは、その日（前の日）の分を取る"""
+        self.write_races([horse('05', 1, '2024000051', '10:05'), horse('05', 2, '2024000052', '10:35')])
+        for when, kw in (('00:11', {}), ('20:00', {'date': DAY})):
+            c = FakeClock(when); c.t += timedelta(days=1)   # 10/25（日付をまたいだ後・次の日）
+            j = FakeJRA(c, {('05', 1): {'time': '10:05', 'horses': ['2024000051'], 'finish': {'2024000051': '4'}},
+                            ('05', 2): {'time': '10:35', 'horses': ['2024000052'], 'finish': {'2024000052': '1'}}})
+            if os.path.exists(fx.RESULTS):
+                os.remove(fx.RESULTS)
+            self.assertEqual(self.run_(c, j, final=True, **kw), {'pending': 0}, when)
+            self.assertEqual(len(j.requests), 3)
+            self.assertEqual({h['horseId']: h['finish'] for h in self.results()['horses']}, {'2024000051': '4', '2024000052': '1'})
+        c = FakeClock('20:00'); c.t += timedelta(days=1)   # 次の日の夜に日付なし → その日（レースなし）は何もしない
+        j = FakeJRA(c, {}); self.assertEqual(self.run_(c, j, final=True), {'pending': 0}); self.assertEqual(j.count, 0)
+        with self.assertRaises(ValueError):
+            fx.Run(j, c, None, log=self.logs.append).run(until=c.now(), date=DAY)
 
     def test_parse_partial_not_done(self):
         """上位5頭だけの段階の1着（タイムはあるが推定上りが空）は、そろったとみなさない"""

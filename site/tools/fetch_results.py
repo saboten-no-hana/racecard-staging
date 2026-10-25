@@ -14,6 +14,9 @@
   python3 tools/fetch_results.py --until 13:00 [--push] [--pending-flag PATH]   午前の回（終わった時に残りがあれば PATH を作る）
   python3 tools/fetch_results.py --until 18:00 [--push]                          午後の回
   python3 tools/fetch_results.py --final [--push]                                仕上げ（まだそろっていないレースの場だけ1回ずつ読む）
+  python3 tools/fetch_results.py --final --date 2026-10-25 [--push]              日付を指定して仕上げ（定期実行が来なかった日の取り直し）
+仕上げは、日付を指定しない時は「その日」の分。正午より前に動いた時は前の日の分とみなす（10/25 の 19:07 の定期実行は
+4時間遅れて 23:15 に起動した。日付をまたぐと何も取らずに終わってしまうため）
 """
 import json
 import os
@@ -151,7 +154,8 @@ class Run:
         for h in self.mine:
             k = (h['venue'], int(h['r']))
             hh, mm = map(int, (h.get('time') or '23:59').split(':'))
-            t = self.clock.now().replace(hour=hh, minute=mm, second=0, microsecond=0)
+            y, mo, d = map(int, h['date'].split('-'))
+            t = self.clock.now().replace(year=y, month=mo, day=d, hour=hh, minute=mm, second=0, microsecond=0)
             out.setdefault(k, {'time': t, 'horses': []})['horses'].append(h)
         return out
 
@@ -253,8 +257,15 @@ class Run:
                 self.done_at[(v, r)] = int((self.clock.now() - race['time']).total_seconds() // 60)
         return newly
 
-    def run(self, until=None, final=False):
+    def run(self, until=None, final=False, date=None):
         now = self.clock.now(); today = now.date().isoformat()
+        if final and not date and now.hour < 12:
+            date = (now.date() - timedelta(days=1)).isoformat()   # 仕上げが日付をまたいで動いた時は前の日の分
+        if date:
+            if not final:
+                raise ValueError('日付の指定は仕上げ（--final）の時だけ')
+            today = date
+            self.log(f'{date} の分を取る（仕上げ）')
         self.load(today)
         races = self.races()
         if not races:
@@ -343,7 +354,10 @@ def main():
     f = Fetcher(arg('--offline'))
     run = Run(f, clock, git_publish if '--push' in sys.argv else None)
     try:
-        st = run.run(until=until, final='--final' in sys.argv)
+        date = arg('--date')
+        if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date):
+            raise ValueError(f'日付の形が違う: {date}（YYYY-MM-DD）')
+        st = run.run(until=until, final='--final' in sys.argv, date=date or None)
         code = 0
     except Exception as e:   # 通信エラーなど。取れた分は書いておく
         print(f'::error::結果の取得中にエラー: {e!r}', flush=True)
