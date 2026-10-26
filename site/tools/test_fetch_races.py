@@ -252,6 +252,47 @@ class TestModes(Base):
         self.assertEqual(code, 0)
         self.assertEqual(len(data['horses']), 12)
 
+    def at_today(self, hhmm):
+        h, m = map(int, hhmm.split(':'))
+        return datetime.now(JST).replace(hour=h, minute=m, second=0, microsecond=0).isoformat(timespec='minutes')
+
+    def test_umaban_second_run_skips(self):
+        """馬番の見張りが2回目に動いた時（外からの起動と定期実行が重なった時など）は JRA にアクセスしない（10/26〜）"""
+        jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': [('2021000001', 'クラブウマ', CARROT, '')]}])
+        done = {'updated': self.at_today('10:21'), 'days': [{'date': day(1), 'venues': ['東京']}],
+                'horses': [{'date': day(1), 'horseId': '2021000001', 'umaban': '1', 'status': ''},
+                           {'date': day(1), 'horseId': '2021000002', 'umaban': '', 'status': '取消'}]}
+        code, _, _ = self.run_main(jra, ['--mode', 'umaban', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=done, summary=True)
+        self.assertEqual((code, jra.requests), (0, []))
+        self.assertIn('取得済み', open(os.path.join(self.tmp.name, 'summary.md'), encoding='utf-8').read())
+
+    def test_umaban_runs_when_not_done_today(self):
+        """馬番がそろっていても、今日の取得でなければ（木曜からのGIだけ等）いつも通り読む。馬番が欠けていても読む"""
+        race = {'date': day(1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': [('2021000001', 'クラブウマ', CARROT, '')]}
+        for upd, uma in ((datetime.now(JST) - timedelta(days=1)).isoformat(timespec='minutes'), '1'), (self.at_today('10:21'), ''):
+            jra = FakeJRA([race])
+            races = {'updated': upd, 'days': [{'date': day(1), 'venues': ['東京']}], 'horses': [{'date': day(1), 'horseId': '2021000001', 'umaban': uma, 'status': ''}]}
+            code, data, _ = self.run_main(jra, ['--mode', 'umaban', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=races)
+            self.assertEqual(code, 0)
+            self.assertTrue(jra.requests)
+            self.assertEqual(data['horses'][0]['umaban'], '1')
+
+    def test_confirm_second_run_skips(self):
+        """出走確定の見張りが2回目に動いた時（今日15時以降に先の開催日を取得済み）は JRA にアクセスしない（10/26〜）"""
+        jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': [('2021000001', 'クラブウマ', CARROT, '')]}])
+        done = {'updated': self.at_today('16:02'), 'days': [{'date': day(2), 'venues': ['東京']}, {'date': day(3), 'venues': ['東京']}], 'horses': []}
+        code, _, _ = self.run_main(jra, ['--mode', 'confirm', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=done)
+        self.assertEqual((code, jra.requests), (0, []))
+
+    def test_confirm_runs_after_morning_update(self):
+        """朝の馬番の取得で更新されただけなら（金曜など）、出走確定の見張りはいつも通り動く"""
+        jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': r, 'umaban': False, 'horses': [(f'20210001{r:02d}', f'ウマ{r}', CARROT, '')]} for r in range(1, 13)])
+        races = {'updated': self.at_today('10:15'), 'days': [{'date': day(1), 'venues': ['東京']}], 'horses': []}
+        code, data, _ = self.run_main(jra, ['--mode', 'confirm', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=races)
+        self.assertEqual(code, 0)
+        self.assertTrue(jra.requests)
+        self.assertEqual(len(data['horses']), 12)
+
     def test_format_error(self):
         """出馬表トップにリンクはあるのに形式が読めない → exit 1"""
         jra = FakeJRA([])

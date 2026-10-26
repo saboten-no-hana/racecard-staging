@@ -228,6 +228,31 @@ def at_jst(hhmm):
     h, m = map(int, hhmm.split(':'))
     return datetime.now(JST).replace(hour=h, minute=m, second=0, microsecond=0)
 
+def already_fetched(mode, now, races):
+    """同じ見張りがもう済んでいるか（10/26〜）。外からの起動と定期実行の両方で同じ見張りが2回動くことがあるため、
+    2回目は JRA を読み直さずに終わる（同じグループの実行は順に動くので、2回目は1回目が終わってから始まる）。
+    - umaban: 今日10時以降に races.json が更新されていて、翌日のクラブ馬（取消・除外を除く）に1頭以上いて全頭に馬番がある
+    - confirm: 今日15時以降に races.json が更新されていて、今日より後の開催日がある（木曜の週末分は取得済み）
+    races.json は変化がなければ書き換えないので、「今日更新された」は今日の取得で何かが入ったことを表す。
+    返り値は理由の文（済んでいなければ None）"""
+    try:
+        upd = datetime.fromisoformat(races.get('updated', '')).astimezone(JST)
+    except (TypeError, ValueError):
+        return None
+    if upd.date() != now.date():
+        return None
+    today = now.date().isoformat()
+    tomorrow = (now.date() + timedelta(days=1)).isoformat()
+    if mode == 'umaban' and upd.hour >= 10:
+        hs = [h for h in races.get('horses', []) if h.get('date') == tomorrow and not h.get('status')]
+        if hs and all(h.get('umaban') for h in hs):
+            return f'{tomorrow} のクラブ馬 {len(hs)}頭の馬番は {upd:%H:%M} に取得済み'
+    if mode == 'confirm' and upd.hour >= 15:
+        later = sorted(d['date'] for d in races.get('days', []) if d.get('date', '') > today)
+        if later:
+            return f'{"・".join(later)} の出馬表は {upd:%H:%M} に取得済み'
+    return None
+
 def main():
     offline = arg('--offline')
     mode = arg('--mode')                     # None（1回だけ）/ confirm（新しい開催日の出走確定）/ umaban（翌日の馬番）
@@ -236,10 +261,19 @@ def main():
     f = Fetcher(offline)
     os.makedirs(DATA, exist_ok=True)
     # 起動時点で races.json にある開催日。これにない日が出馬表トップに載ったら「新しい開催日」
-    known = set()
+    known, races0 = set(), {}
     if os.path.exists(OUT):
-        known = {d['date'] for d in json.load(open(OUT, encoding='utf-8')).get('days', [])}
+        races0 = json.load(open(OUT, encoding='utf-8'))
+        known = {d['date'] for d in races0.get('days', [])}
     ctx = {'known': known, 'prev': {}, 'verified': set()}
+    done = already_fetched(mode, datetime.now(JST), races0) if mode and not offline else None
+    if done:
+        # 同じ見張りが2回目に動いた時（外からの起動と定期実行が重なった時など）は JRA にアクセスせずに終わる（10/26〜）
+        print(f'{done}。同じ見張りは済んでいるので何もしない（JRA にはアクセスしない）', flush=True)
+        print(f'::notice::{done}（2回目の見張りなので JRA にはアクセスしていない）', flush=True)
+        ctx['done'] = done
+        write_summary(mode, 'skip', 0, 0, ctx)
+        return 0
     if mode and not offline:
         start = at_jst(arg('--start', '00:00'))
         until = at_jst(arg('--until', '23:59'))
@@ -299,6 +333,8 @@ def write_summary(mode, state, code, count, ctx):
         L += ['', '| クラブ | 頭数 |', '|---|---:|']
         L += [f"| {names.get(k, k)} | {v} |" for k, v in sorted(last['hits'].items(), key=lambda kv: -kv[1])]
         L += ['', f"一致しなかったクラブらしい名義: {'、'.join(last['miss']) or 'なし'}"]
+    elif ctx.get('done'):
+        L.append(f"- 出馬表は取得していない（{ctx['done']}。2回目の見張りなので JRA にはアクセスしていない）")
     else:
         L.append('- 出馬表は取得していない（未発表・対象なし・エラー）')
     if ctx.get('changed'):

@@ -19,10 +19,12 @@
       起動から5時間半（ジョブの上限の手前）か、18:00 と「最終レースの発走45分後」の遅い方の、早い方まで（2027年夏の1日7競走は
       最終レースが18:30ごろ）。時間切れで残りがあれば PATH を作る（次の回を起動する合図）
       読み取りの失敗は3分後に読み直し、3回続けて失敗したら止めて PATH に 'error' と書く（次の回は --after-error で、15分待ってから読む。
-      その回がまた止まった時は起動しない）
+      その回がまた止まった時は起動しない）。時間切れの時は終わりの時刻まで待ってから引き継ぐ（0時台に起動しても朝まで待つ）。
+      その日の最後の回で、そろっていないレースが残れば PATH に 'final' と書く（19:07 まで待つ仕上げの回を起動する合図、10/26〜）
   python3 tools/fetch_results.py --until 13:00 [--push]                  終わりの時刻を指定して取る（テスト・手動用）
   python3 tools/fetch_results.py --final [--push]                                仕上げ（まだそろっていないレースの場だけ1回ずつ読む）
   python3 tools/fetch_results.py --final --date 2026-10-25 [--push]              日付を指定して仕上げ（定期実行が来なかった日の取り直し）
+  python3 tools/fetch_results.py --final --start 19:07 [--push]                  その時刻まで待ってから仕上げ（その日の最後の --auto の回が起動する。10/26〜）
 仕上げは、日付を指定しない時は「その日」の分。正午より前に動いた時は前の日の分とみなす（10/25 の 19:07 の定期実行は
 4時間遅れて 23:15 に起動した。日付をまたぐと何も取らずに終わってしまうため）
 """
@@ -51,6 +53,7 @@ MAX_FAILS = 3        # 読み取りがこの回数続けて失敗したら、そ
 AFTER_ERROR_WAIT = 15  # 失敗で止まった回の代わりに起動した回は、この分数だけ待ってから読み始める（すぐ読んでも同じ失敗になりやすいため）
 STOP_BLANK = 2       # 同じ場のレースがこの数だけ続けて「発走 GIVE_UP 分後まで何も載らない」なら、その回ではその場を読むのをやめる
                      # （10/26〜。雪・台風で開催中止になった場は結果トップに最後まで載らず、レースごとに読み直しが続いていた。仕上げに任せる）
+FINAL_AT = (19, 7)   # その日の最後の回から起動した仕上げの回は、この時刻まで待ってから読む（--final --start、10/26〜）
 LAST_RACE_MARGIN = GIVE_UP + 5   # --auto は、最終レースの発走からこの分数までは読む（10/26〜。2027年夏の1日7競走は最終レースが18:30ごろ）
 CODE = {v: k for k, v in VENUES.items()}
 RACE_FIELDS = ('key', 'horseId', 'name', 'clubId', 'date', 'venue', 'r', 'time', 'raceName', 'grade', 'cls', 'surface', 'dist', 'status')
@@ -149,6 +152,7 @@ class Run:
         self.day = None                   # 対象の日（YYYY-MM-DD）
         self.errors = 0                   # 読み取りに失敗した回数（通信エラーなど）
         self.capped = False               # --auto の終わりが時間切れ（ジョブの上限）によるものか
+        self.left = 0                     # 終わった時点で、その日のうちにそろっていないレースの数（あきらめた分も含む）
         self.blank = {}                   # 場 → 続けて「何も載らないまま発走 GIVE_UP 分後」になったレースの数
         self._top = None                  # この読みのサイクルで読んだ結果トップ（同じサイクルで二度読まない）
 
@@ -335,6 +339,7 @@ class Run:
             left = [k for k, v in pending.items() if not self.complete(v)]
             if left:
                 self.notes.append('仕上げでもそろわなかった: ' + '、'.join(f'{v}{r}R' for v, r in sorted(left)))
+            self.left = len(left)
             return {'pending': len(left)}
         next_try = {k: v['time'] + timedelta(minutes=START_AFTER) for k, v in pending.items()}
         ses, fails = None, 0
@@ -344,6 +349,10 @@ class Run:
             if not due:
                 wake = min(next_try.values())
                 if until and wake > until:
+                    if self.capped and until > now:
+                        # 時間切れで次の回に引き継ぐ時は、終わりの時刻まで待ってから引き継ぐ（10/26〜。0時台に起動した回が
+                        # 最初のレースまで待てずにすぐ次の回を起動し、起動が続いてしまわないように）。待つ間は JRA にアクセスしない
+                        self.clock.sleep((until - now).total_seconds())
                     break
                 self.clock.sleep((wake - now).total_seconds())
                 continue
@@ -391,6 +400,8 @@ class Run:
             if self.dirty:
                 self.flush('結果を更新')
         self.flush('結果を更新', force=True)
+        # その日のうちにそろわなかったレース（発走40分後であきらめた分と、まだ読む前の分）。最後の回なら仕上げの回を起動する合図になる
+        self.left = sum(1 for r in races.values() if not self.complete(r))
         return {'pending': len(pending)}
 
 
@@ -441,9 +452,11 @@ def on_main():
     return r.stdout.strip() == 'main'
 
 
-def next_run(auto, capped, after_error, code, pending):
+def next_run(auto, capped, after_error, code, pending, left=0):
     """次の回を起動する合図（--pending-flag のファイルの中身）。起動しない時は None
     - 時間切れ（ジョブの上限）で残りがある → 残りのレース数（次の回はすぐ読み始める）
+    - その日の最後の回（時間切れではない）で、そろっていないレースが残った → 'final'（10/26〜。FINAL_AT まで待つ仕上げの回。
+      19:07 の定期実行は2〜6時間遅れたり来なかったりするため。全部そろっていれば起動しないので JRA へのアクセスは増えない）
     - 読み取りの失敗が続いて止まった → 'error'（10/26〜。次の回は AFTER_ERROR_WAIT 分待ってから読む）。
       ただし、その代わりに起動した回（--after-error）がまた止まった時は起動しない（失敗の連鎖で読み続けないため。
       あとは予備の定期実行と 19:07 の仕上げに任せる）"""
@@ -451,6 +464,8 @@ def next_run(auto, capped, after_error, code, pending):
         return 'error' if auto and not after_error else None
     if pending > 0 and (capped or not auto):
         return str(pending)
+    if auto and left > 0:
+        return 'final'   # その日の最後の回で、そろっていないレースが残った → 19:07 まで待つ仕上げの回（10/26〜。定期実行の遅れを受けない）
     return None
 
 
@@ -463,6 +478,13 @@ def main():
     if after_error and auto:
         print(f'前の回が読み取りの失敗で止まったので、{AFTER_ERROR_WAIT}分待ってから読み始める', flush=True)
         clock.sleep(AFTER_ERROR_WAIT * 60)
+    if '--final' in sys.argv and arg('--start'):
+        # その日の最後の回から起動した仕上げの回: 指定の時刻まで待つ（10/26〜。待つ間は JRA にアクセスしない）
+        h, m = map(int, arg('--start').split(':'))
+        at = clock.now().replace(hour=h, minute=m, second=0, microsecond=0)
+        if at > clock.now():
+            print(f'{at:%H:%M} まで待ってから仕上げ', flush=True)
+            clock.sleep((at - clock.now()).total_seconds())
     # --auto の終わりの時刻は Run.run() がレースの一覧を読んでから決める（最終レースの発走に合わせるため）
     if not auto and arg('--until'):
         h, m = map(int, arg('--until').split(':'))
@@ -487,7 +509,7 @@ def main():
         print(f'::error::結果の取得中にエラー: {e!r}', flush=True)
         run.flush('結果を更新', force=True)
         st, code = {'pending': -1}, 1
-    nxt = next_run(auto, run.capped, after_error, code, st['pending'])
+    nxt = next_run(auto, run.capped, after_error, code, st['pending'], run.left)
     if arg('--pending-flag') and nxt:
         open(arg('--pending-flag'), 'w').write(nxt)
     mins = '、'.join(f'{v}{r}R {m}分' for (v, r), m in sorted(run.done_at.items(), key=lambda kv: (CODE.get(kv[0][0], '99'), kv[0][1])))

@@ -332,7 +332,7 @@ class TestFetchResults(unittest.TestCase):
         run = fx.Run(FakeJRA(c, {}), c, None, log=self.logs.append)
         self.assertEqual(run.run(auto_start=start), {'pending': 1})
         self.assertTrue(run.capped)
-        self.assertEqual(c.now().strftime('%H:%M'), '08:46')   # 16:25 のレースは 14:01（起動の330分後）より後なので読まずに次の回へ
+        self.assertEqual(c.now().strftime('%H:%M'), '14:01')   # 16:25 のレースは 14:01（起動の330分後）より後なので、14:01 まで待って次の回へ
         self.assertIn('14:01 まで（時間切れなら次の回に引き継ぐ）', self.logs)
 
     def test_main_after_error_counts_from_start(self):
@@ -464,6 +464,46 @@ class TestFetchResults(unittest.TestCase):
         self.assertIsNone(fx.next_run(True, True, True, 1, -1))         # 代わりの回がまた止まった → 起動しない
         self.assertEqual(fx.next_run(True, True, True, 0, 3), '3')      # 代わりの回が時間切れ → 普通に次の回
         self.assertIsNone(fx.next_run(False, False, False, 1, -1))      # 仕上げは起動しない
+        # その日の最後の回で、そろっていないレースが残った → 19:07 まで待つ仕上げの回（10/26〜）
+        self.assertEqual(fx.next_run(True, False, False, 0, 2, left=3), 'final')
+        self.assertEqual(fx.next_run(True, True, False, 0, 0, left=1), 'final')   # 時間切れでも、もう読むレースがなければ最後の回
+        self.assertEqual(fx.next_run(True, True, False, 0, 2, left=3), '2')       # 読むレースが残っていれば次の auto
+        self.assertIsNone(fx.next_run(True, False, False, 0, 0, left=0))          # 全部そろった → 起動しない
+        self.assertIsNone(fx.next_run(False, False, False, 0, 0, left=2))         # 仕上げからは起動しない
+
+    def test_early_run_waits_before_handoff(self):
+        """0時台に起動した回は、最初のレースまで待てなくても、終わりの時刻（起動の5時間半後）まで待ってから次の回に引き継ぐ。
+        すぐに引き継ぐと起動が続いてしまう（10/26〜）。待つ間は JRA にアクセスしない"""
+        self.write_races([horse('05', 1, '2024000081', '10:05')])
+        c = FakeClock('00:40'); j = FakeJRA(c, {})
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(auto_start=c.now()), {'pending': 1})
+        self.assertEqual((c.now().strftime('%H:%M'), run.capped, j.count), ('06:10', True, 0))
+        self.assertEqual(fx.next_run(True, run.capped, False, 0, 1, run.left), '1')
+
+    def test_last_run_asks_for_final(self):
+        """その日の最後の回が、そろっていないレース（発走40分後であきらめた分）を残して終わったら、仕上げの回を起動する合図"""
+        self.write_races([horse('05', 3, '2024000091', '11:05'), horse('05', 4, '2024000092', '11:40')])
+        c = FakeClock('13:20')
+        j = FakeJRA(c, {('05', 3): {'time': '11:05', 'horses': ['2024000091'], 'finish': {'2024000091': '1'}},
+                        ('05', 4): {'time': '11:40', 'horses': ['2024000092'], 'finish': {}, 'late': 300}})   # 4R は載らない
+        run = fx.Run(j, c, None, log=self.logs.append)
+        run.run(auto_start=c.now())
+        self.assertFalse(run.capped)
+        self.assertEqual(run.left, 1)
+        self.assertEqual(fx.next_run(True, run.capped, False, 0, 0, run.left), 'final')
+
+    def test_main_final_waits_until_start(self):
+        """main(): 最後の回から起動した仕上げ（--final --start 19:07）は、19:07 まで待ってから読む"""
+        c = FakeClock('18:02'); got = {}
+        def fake_run(self_, **kw):
+            got.update(kw, now=c.now()); return {'pending': 0}
+        with mock.patch.object(fx, 'Clock', lambda: c), mock.patch.object(fx.Run, 'run', fake_run), \
+                mock.patch.object(sys, 'argv', ['fetch_results.py', '--final', '--start', '19:07', '--offline', self.tmp.name]), \
+                mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': ''}), mock.patch('builtins.print'):
+            self.assertEqual(fx.main(), 0)
+        self.assertEqual(got['now'].strftime('%H:%M'), '19:07')
+        self.assertTrue(got['final'])
 
     def test_on_main(self):
         """main 以外のブランチで動いた時は push しない（GITHUB_REF で判定）"""
