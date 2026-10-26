@@ -71,8 +71,15 @@ def main():
     t = sw.read_text(encoding='utf-8')
     t = sub_once(t, "'racecard-static-", "'racecard-stg-static-", 'sw.js')
     t = sub_once(t, "'racecard-pages-", "'racecard-stg-pages-", 'sw.js')
-    t = sub_once(t, 'ks.filter(k => k !== STATIC && k !== PAGES)',
-                 "ks.filter(k => k.startsWith('racecard-stg-') && k !== STATIC && k !== PAGES)", 'sw.js')
+    # 古いキャッシュの削除はテスト環境の分だけにする。本番の書き方は 10/26 に「racecard- で始まり stg- でないもの」に変わった（どちらにも対応）
+    stg_filter = "ks.filter(k => k.startsWith('racecard-stg-') && k !== STATIC && k !== PAGES)"
+    for old_filter in ('ks.filter(k => /^racecard-(?!stg-)/.test(k) && k !== STATIC && k !== PAGES)',
+                       'ks.filter(k => k !== STATIC && k !== PAGES)'):
+        if old_filter in t:
+            t = t.replace(old_filter, stg_filter)
+            break
+    else:
+        fail('sw.js に古いキャッシュを消す処理（ks.filter(…)）が見つからない（本番のコードの形が変わった？ stage/build.py を直す）')
     sw.write_text(t, encoding='utf-8')
 
     # 3. 全ページ: noindex・タイトル・帯
