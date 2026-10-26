@@ -42,6 +42,8 @@ class TestWeb(unittest.TestCase):
         self.assertNotIn("setItem('racecard.v2'", html)
         sw = open(os.path.join(ROOT, 'sw.js'), encoding='utf-8').read()
         self.assertIn("'result/'", sw)
+        # 古いキャッシュを消すのはこのページの分だけ（同じドメインのテスト環境 racecard-stg-… は残す。10/26〜）
+        self.assertIn("/^racecard-(?!stg-)/.test(k)", sw)
 
     def test_core_exports(self):
         """index.html・result/index.html の const { … } = window.RCCore の名前が、card-core.js の window.RCCore にすべてあるか（読み込んで確かめる）"""

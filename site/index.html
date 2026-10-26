@@ -376,6 +376,8 @@ const uid = () => Math.random().toString(36).slice(2,9);
 const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 /* 今日の日付は日本時間で決める（10/26〜。端末の時計の地域に左右されないように。出馬表の状態の表示 jstNow と同じ） */
 const todayYmd = () => { const d=new Date(Date.now()+9*3600e3); return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())}`; };
+/* 更新時刻も日本時間で表示する（10/26〜。以前は端末の時計の地域で表示していた）。"2026-10-24T10:12+09:00" → "10/24 10:12" */
+const jstTime = s => { const d=new Date(new Date(s).getTime()+9*3600e3); return isNaN(d)?'':`${d.getUTCMonth()+1}/${d.getUTCDate()} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`; };
 /* 開催週: 火曜〜翌月曜をひとまとまりとみなす（3日間開催の月曜は前の土日と同じ週）。返り値はその週の火曜の日付 */
 function meetWeek(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); if(!m) return ''; const d=new Date(+m[1],m[2]-1,+m[3]); d.setDate(d.getDate()-(d.getDay()+5)%7); return ymd(d); }
 const isPastWeek = h => !!h.date && !!meetWeek(h.date) && meetWeek(h.date) < meetWeek(todayYmd()); /* 頭数は取消・除外を除く */
@@ -783,7 +785,7 @@ async function loadRaces(){
   try{
     const r=await fetch('data/races.json',{cache:'no-cache'}); if(!r.ok) throw new Error(r.status);
     RACES=await r.json(); HELD={}; RACES.days.forEach(d=>HELD[d.date]=d.venues);
-    const t=new Date(RACES.updated); U.textContent=`出馬表 ${t.getMonth()+1}/${t.getDate()} ${pad2(t.getHours())}:${pad2(t.getMinutes())} 更新・${RACES.horses.length}頭`;
+    U.textContent=`出馬表 ${jstTime(RACES.updated)} 更新・${RACES.horses.length}頭`;
     const counts={}; RACES.horses.forEach(x=>counts[x.clubId]=(counts[x.clubId]||0)+1);
     $('#p-club').innerHTML=`<option value="">すべてのクラブ（${RACES.horses.length}頭）</option>`+CLUBS.filter(c=>counts[c.id]).map(c=>`<option value="${c.id}">${esc(c.name)}（${counts[c.id]}頭）</option>`).join('');
     try{ const v=localStorage.getItem('racecard.pclub'); if(v&&counts[v]) $('#p-club').value=v; }catch(e){}

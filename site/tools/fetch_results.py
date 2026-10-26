@@ -9,10 +9,14 @@
 - 結果が取れるたびに results.json を書き、--push の時は1レースごとにコミットして push する（10/24、私の指定）。
   Pages の反映は1時間に10回までの目安があるので、1時間に8回を超えそうな時は次の機会にまとめる（終わる時の1回は残さず push）
 - 1開催日のリクエスト数の見込み: 40〜45（結果トップ・開催のページ 最大7＋クラブ馬の出るレース30〜35＋読み直し数回）
+- 通信エラー（10/26〜）: 1つの読みが失敗しても回ごと止めず3分後に読み直す。3回続けて失敗したらその回は止め、代わりの回を1回だけ
+  起動する（15分待ってから読む）。その回も止まったら、予備の定期実行と仕上げに任せる。通常時のリクエスト数は変わらない
 
 使い方:
-  python3 tools/fetch_results.py --auto [--push] [--pending-flag PATH]   その日の残りのレースを取る（10/26〜。午前・午後の区別なし）
+  python3 tools/fetch_results.py --auto [--push] [--pending-flag PATH] [--after-error]   その日の残りのレースを取る（10/26〜。午前・午後の区別なし）
       起動から5時間半（ジョブの上限の手前）か 18:00 の早い方まで。時間切れで残りがあれば PATH を作る（次の回を起動する合図）
+      読み取りの失敗は3分後に読み直し、3回続けて失敗したら止めて PATH に 'error' と書く（次の回は --after-error で、15分待ってから読む。
+      その回がまた止まった時は起動しない）
   python3 tools/fetch_results.py --until 13:00 [--push]                  終わりの時刻を指定して取る（テスト・手動用）
   python3 tools/fetch_results.py --final [--push]                                仕上げ（まだそろっていないレースの場だけ1回ずつ読む）
   python3 tools/fetch_results.py --final --date 2026-10-25 [--push]              日付を指定して仕上げ（定期実行が来なかった日の取り直し）
@@ -40,6 +44,8 @@ GIVE_UP = 40         # 発走から何分であきらめるか（あとは仕上
 AUTO_SPAN = 330      # --auto の1回の長さ（分）。ジョブの上限（timeout-minutes: 345）の手前で終えて次の回に引き継ぐ
 DAY_END = (18, 0)    # --auto で読むのはこの時刻まで（以後は 19:07 の仕上げ）
 PUSH_PER_HOUR = 8    # Pages の反映の目安（1時間に10回）より少なめ
+MAX_FAILS = 3        # 読み取りがこの回数続けて失敗したら、その回は止める（10/26〜。1回の失敗では止めずに RETRY 分後に読み直す）
+AFTER_ERROR_WAIT = 15  # 失敗で止まった回の代わりに起動した回は、この分数だけ待ってから読み始める（すぐ読んでも同じ失敗になりやすいため）
 CODE = {v: k for k, v in VENUES.items()}
 RACE_FIELDS = ('key', 'horseId', 'name', 'clubId', 'date', 'venue', 'r', 'time', 'raceName', 'grade', 'cls', 'surface', 'dist', 'status')
 
@@ -135,6 +141,7 @@ class Run:
         self.target = None                # (対象の日, クラブ馬の出るレース数, 取得済み)
         self.kai_of = {}                  # 場 → 開催のページ（全レースまとめのリンクがまだなかった時に読み直す）
         self.day = None                   # 対象の日（YYYY-MM-DD）
+        self.errors = 0                   # 読み取りに失敗した回数（通信エラーなど）
 
     # ---- データ
     def load(self, today):
@@ -302,7 +309,12 @@ class Run:
         if final:
             ses = self.meetings(venues, today)
             for v in venues:
-                newly = self.read(v, ses, pending)
+                try:
+                    newly = self.read(v, ses, pending)
+                except Exception as e:   # 1つの場が読めなくても、ほかの場は読む（10/26〜）
+                    self.errors += 1
+                    self.notes.append(f'仕上げで {v} を読めなかった: {e!r}')
+                    continue
                 if newly:
                     self.log(f'  {v} {"・".join(f"{r}R" for r in sorted(newly))} を取得（仕上げ）')
             self.flush('結果を更新（仕上げ）', force=True)
@@ -311,7 +323,7 @@ class Run:
                 self.notes.append('仕上げでもそろわなかった: ' + '、'.join(f'{v}{r}R' for v, r in sorted(left)))
             return {'pending': len(left)}
         next_try = {k: v['time'] + timedelta(minutes=START_AFTER) for k, v in pending.items()}
-        ses = None
+        ses, fails = None, 0
         while pending:
             now = self.clock.now()
             due = [k for k, t in next_try.items() if t <= now]
@@ -321,13 +333,24 @@ class Run:
                     break
                 self.clock.sleep((wake - now).total_seconds())
                 continue
-            if ses is None:
-                ses = self.meetings(venues, today)
-            for v in sorted({v for v, _ in due}, key=lambda v: CODE.get(v, '99')):
-                newly = self.read(v, ses, pending)
-                if newly:
-                    self.log(f'  {now:%H:%M} {v} {"・".join(f"{r}R" for r in sorted(newly))} を取得')
-                    self.flush(f'結果を更新 {v}{"・".join(f"{r}R" for r in sorted(newly))}')
+            try:
+                if ses is None:
+                    ses = self.meetings(venues, today)
+                for v in sorted({v for v, _ in due}, key=lambda v: CODE.get(v, '99')):
+                    newly = self.read(v, ses, pending)
+                    if newly:
+                        self.log(f'  {now:%H:%M} {v} {"・".join(f"{r}R" for r in sorted(newly))} を取得')
+                        self.flush(f'結果を更新 {v}{"・".join(f"{r}R" for r in sorted(newly))}')
+                fails = 0
+            except Exception as e:
+                # 通信エラーなどでこの回の読みが失敗しても、回ごと止めずに RETRY 分後に読み直す（10/26〜。以前はその場で終了し、
+                # 次の回も起動しなかった）。MAX_FAILS 回続けて失敗したら止める（ブロックされた時などに読み続けないため）
+                fails += 1
+                self.errors += 1
+                self.notes.append(f'{now:%H:%M} 読み取りに失敗（{fails}回続けて）: {e!r}')
+                self.log(f'  {now:%H:%M} 読み取りに失敗（{fails}回続けて）: {e!r}')
+                if fails >= MAX_FAILS:
+                    raise
             now = self.clock.now()
             for k in list(pending):
                 if self.complete(pending[k]):
@@ -386,9 +409,26 @@ def on_main():
     return r.stdout.strip() == 'main'
 
 
+def next_run(auto, capped, after_error, code, pending):
+    """次の回を起動する合図（--pending-flag のファイルの中身）。起動しない時は None
+    - 時間切れ（ジョブの上限）で残りがある → 残りのレース数（次の回はすぐ読み始める）
+    - 読み取りの失敗が続いて止まった → 'error'（10/26〜。次の回は AFTER_ERROR_WAIT 分待ってから読む）。
+      ただし、その代わりに起動した回（--after-error）がまた止まった時は起動しない（失敗の連鎖で読み続けないため。
+      あとは予備の定期実行と 19:07 の仕上げに任せる）"""
+    if code:
+        return 'error' if auto and not after_error else None
+    if pending > 0 and (capped or not auto):
+        return str(pending)
+    return None
+
+
 def main():
     clock = Clock()
     until, capped = None, False
+    after_error = '--after-error' in sys.argv
+    if after_error and '--auto' in sys.argv:
+        print(f'前の回が読み取りの失敗で止まったので、{AFTER_ERROR_WAIT}分待ってから読み始める', flush=True)
+        clock.sleep(AFTER_ERROR_WAIT * 60)
     if '--auto' in sys.argv:
         until, capped = auto_until(clock.now())
         print(f'{until:%H:%M} まで（{"時間切れなら次の回に引き継ぐ" if capped else "あとは仕上げ"}）', flush=True)
@@ -408,12 +448,16 @@ def main():
             raise ValueError(f'日付の形が違う: {date}（YYYY-MM-DD）')
         st = run.run(until=until, final='--final' in sys.argv, date=date or None)
         code = 0
-    except Exception as e:   # 通信エラーなど。取れた分は書いておく
+        if run.errors and st['pending'] > 0 and '--final' in sys.argv:
+            print('::error::仕上げで読めなかった場があり、そろっていないレースが残った', flush=True)
+            code = 1
+    except Exception as e:   # 読み取りの失敗が続いた時など。取れた分は書いておく
         print(f'::error::結果の取得中にエラー: {e!r}', flush=True)
         run.flush('結果を更新', force=True)
         st, code = {'pending': -1}, 1
-    if arg('--pending-flag') and st['pending'] > 0 and (capped or '--auto' not in sys.argv):
-        open(arg('--pending-flag'), 'w').write(str(st['pending']))
+    nxt = next_run('--auto' in sys.argv, capped, after_error, code, st['pending'])
+    if arg('--pending-flag') and nxt:
+        open(arg('--pending-flag'), 'w').write(nxt)
     mins = '、'.join(f'{v}{r}R {m}分' for (v, r), m in sorted(run.done_at.items(), key=lambda kv: (CODE.get(kv[0][0], '99'), kv[0][1])))
     tg = getattr(run, 'target', None)
     if tg:   # 何もしなかった時に「なぜ0か」が分かるように（10/26、日付を指定した取り直しで既にそろっていた時に0と出て分かりにくかった）

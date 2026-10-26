@@ -13,7 +13,8 @@ self.addEventListener('install', e => {
     .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== STATIC && k !== PAGES).map(k => caches.delete(k))))
+  // 消すのはこのページの古いキャッシュだけ（10/26〜）。同じドメインのテスト環境（racecard-stg-…）や、ほかのページのキャッシュは残す
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => /^racecard-(?!stg-)/.test(k) && k !== STATIC && k !== PAGES).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 const isStatic = p => /\/(fonts|silks)\/|\.(png|svg|ttf)$/.test(p);

@@ -219,6 +219,22 @@ class TestModes(Base):
         code, _, _ = self.run_main(jra, [])
         self.assertEqual(code, 1)
 
+    def test_records_kept_when_attempt_fails(self):
+        """試行の途中で止まっても（通信エラー）、それまでに分かった名義は cache.json に残す（次の試行で読み直さないため）"""
+        jra = FakeJRA([{'date': day(2), 'venue_code': '08', 'r': 3, 'umaban': False,
+                        'horses': [('2022000001', 'サキニヨム', SILK, ''), ('2022000002', 'ツギデオチル', CARROT, '')]}])
+        orig = jra.get
+
+        def get(s, c, p, path):
+            if c.startswith('pw01dud002022000002'):
+                raise RuntimeError('取得できませんでした: ' + c)
+            return orig(s, c, p, path)
+        jra.get = get
+        code, data, cache = self.run_main(jra, [])
+        self.assertEqual(code, 1)
+        self.assertEqual(cache, {'2022000001': 'silk'})   # 1頭目の名義は残っている
+        self.assertEqual(data['horses'], [])              # races.json は書かない（途中のものを公開しない）
+
     def test_persistent_error_fails(self):
         """最後まで通信エラーで一度も取れなければ exit 1"""
         jra = FakeJRA([])
@@ -291,6 +307,41 @@ class TestModes(Base):
         s = open(os.path.join(self.tmp.name, 'summary.md'), encoding='utf-8').read()
         self.assertIn('キャロットクラブ | 1', s)
         self.assertIn('リクエスト数', s)
+
+
+class TestFetcherRetry(unittest.TestCase):
+    def test_retry_on_broken_read(self):
+        """本文を読んでいる途中の接続切れ（ConnectionResetError・IncompleteRead）も取り直す（10/26〜）"""
+        import http.client
+        calls = {'n': 0}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                calls['n'] += 1
+                if calls['n'] == 1:
+                    raise ConnectionResetError(104, 'Connection reset by peer')
+                if calls['n'] == 2:
+                    raise http.client.IncompleteRead(b'<html>')
+                return '<html>読めた</html>'.encode('cp932')
+        with mock.patch.object(fr.urllib.request, 'urlopen', lambda *a, **k: Resp()), mock.patch.object(fr.time, 'sleep', lambda s: None), \
+                redirect_stdout(io.StringIO()):
+            f = fr.Fetcher()
+            self.assertIn('読めた', f.get('pw01dli00/F3', post=True))
+        self.assertEqual((calls['n'], f.count), (3, 3))
+
+    def test_gives_up_after_three(self):
+        with mock.patch.object(fr.urllib.request, 'urlopen', mock.Mock(side_effect=ConnectionResetError(104, 'reset'))), \
+                mock.patch.object(fr.time, 'sleep', lambda s: None), redirect_stdout(io.StringIO()):
+            f = fr.Fetcher()
+            with self.assertRaises(RuntimeError):
+                f.get('pw01dli00/F3', post=True)
+        self.assertEqual(f.count, 3)
 
 
 class TestExitCode(unittest.TestCase):

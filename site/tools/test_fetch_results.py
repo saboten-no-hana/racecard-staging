@@ -329,6 +329,68 @@ class TestFetchResults(unittest.TestCase):
         self.assertEqual(self.run_(c, j, until=fx.auto_until(c.now())[0]), {'pending': 0})
         self.assertEqual(j.count, 0)
 
+    def flaky(self, j, bad):
+        """bad(cname, 何回目) が True の読みだけ通信エラー（Fetcher が3回試して諦めた時と同じ RuntimeError）にする"""
+        real, seen = j.get, {}
+
+        def get(cname, post=False, path=''):
+            seen[cname] = seen.get(cname, 0) + 1
+            if bad(cname, seen[cname]):
+                j.count += 1
+                raise RuntimeError('取得できませんでした: ' + cname)
+            return real(cname, post, path)
+        j.get = get
+
+    def three_races(self, c):
+        self.write_races([horse('05', 1, '2024000001', '10:05'), horse('08', 2, '2024000004', '10:25'), horse('05', 5, '2024000003', '12:25')],
+                         days=[{'date': DAY, 'venues': ['東京', '京都']}])
+        return FakeJRA(c, {('05', 1): {'time': '10:05', 'horses': ['2024000001'], 'finish': {'2024000001': '1'}},
+                           ('08', 2): {'time': '10:25', 'horses': ['2024000004'], 'finish': {'2024000004': '3'}},
+                           ('05', 5): {'time': '12:25', 'horses': ['2024000003'], 'finish': {'2024000003': '8'}}})
+
+    def test_one_error_does_not_stop(self):
+        """読み取りが1回失敗しても回ごと止めず、3分後に読み直して残りのレースも取る（10/26 修正。以前はその場で終わっていた）"""
+        c = FakeClock('07:40'); j = self.three_races(c)
+        self.flaky(j, lambda cname, n: cname.startswith('pw01ses') and cname[9:11] == '08' and n == 1)
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(until=c.now().replace(hour=13, minute=10)), {'pending': 0})
+        self.assertEqual({h['horseId']: h['finish'] for h in self.results()['horses']}, {'2024000001': '1', '2024000004': '3', '2024000003': '8'})
+        self.assertEqual(run.errors, 1)
+        self.assertTrue(any('読み取りに失敗（1回続けて）' in n for n in run.notes))
+
+    def test_errors_in_a_row_stop(self):
+        """3回続けて失敗したら止める（ブロックされた時などに読み続けない）。取れた分は書いてある"""
+        c = FakeClock('07:40'); j = self.three_races(c)
+        self.flaky(j, lambda cname, n: cname.startswith('pw01ses') and cname[9:11] == '08')
+        run = fx.Run(j, c, None, log=self.logs.append)
+        with self.assertRaises(RuntimeError):
+            run.run(until=c.now().replace(hour=13, minute=10))
+        self.assertEqual(run.errors, fx.MAX_FAILS)
+        self.assertEqual(c.now().strftime('%H:%M'), '10:44')   # 京都2R（10:25）の読み 10:38 → 10:41 → 10:44 で止まる（テストは発走13分後から）
+        run.flush('結果を更新', force=True)   # main() と同じく、止まる前に取れた分を書く
+        self.assertEqual([h['horseId'] for h in self.results()['horses']], ['2024000001'])
+        self.assertLessEqual(sum(1 for x in j.requests if x.startswith('pw01ses01082')), fx.MAX_FAILS)
+
+    def test_final_reads_other_venues_on_error(self):
+        """仕上げは、1つの場が読めなくても、ほかの場は読む"""
+        c = FakeClock('19:07'); j = self.three_races(c)
+        self.flaky(j, lambda cname, n: cname.startswith('pw01ses') and cname[9:11] == '05')
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(final=True), {'pending': 2})
+        self.assertEqual([h['horseId'] for h in self.results()['horses']], ['2024000004'])
+        self.assertEqual(run.errors, 1)
+
+    def test_next_run(self):
+        """次の回の起動: 時間切れで残りがあれば残りの数、失敗で止まったら error（代わりの回がまた止まったら起動しない）"""
+        self.assertEqual(fx.next_run(True, True, False, 0, 5), '5')     # 時間切れ
+        self.assertIsNone(fx.next_run(True, False, False, 0, 2))        # 18:00 まで動いた（あとは仕上げ）
+        self.assertIsNone(fx.next_run(True, True, False, 0, 0))         # 残りなし
+        self.assertEqual(fx.next_run(True, True, False, 1, -1), 'error')
+        self.assertEqual(fx.next_run(True, False, False, 1, -1), 'error')
+        self.assertIsNone(fx.next_run(True, True, True, 1, -1))         # 代わりの回がまた止まった → 起動しない
+        self.assertEqual(fx.next_run(True, True, True, 0, 3), '3')      # 代わりの回が時間切れ → 普通に次の回
+        self.assertIsNone(fx.next_run(False, False, False, 1, -1))      # 仕上げは起動しない
+
     def test_on_main(self):
         """main 以外のブランチで動いた時は push しない（GITHUB_REF で判定）"""
         with mock.patch.dict(os.environ, {'GITHUB_REF': 'refs/heads/main'}):
