@@ -42,10 +42,18 @@ RACE_FIELDS = ('key', 'horseId', 'name', 'clubId', 'date', 'venue', 'r', 'time',
 
 
 # ---------------------------------------------------------------- 日付
-def meet_week(ymd):
-    """開催週（火曜〜翌月曜）の火曜の日付。ページ側（meetWeek）と同じ"""
-    d = datetime.strptime(ymd, '%Y-%m-%d').date()
-    return (d - timedelta(days=(d.weekday() - 1) % 7)).isoformat()
+NEW_GROUP_GAP = 4   # 前の開催日から何日以上あいたら「新しい開催のまとまり」とみなすか（10/26〜。結果カードのページの GROUP_GAP と同じ）
+
+
+def new_group(last, ymd):
+    """ymd が、それまでの最後の開催日 last から NEW_GROUP_GAP 日以上あとなら True（前の開催の結果を消してよい）。
+    曜日では決めない（10/26、私の指定）: 以前は開催週（火曜〜翌月曜）で判定していたため、火曜の朝の取得で週末の結果を
+    消していた（火〜木の結果カードが全頭「結果待ち」になる）。日付の間隔だけで決めるので、3日間開催の月曜・代替開催の火曜
+    （日曜から2日・土曜から3日）は前の土日と同じまとまり、代替の火曜から次の土曜（4日）は別、年末年始の変則日程も同じ規則で扱える"""
+    if not last:
+        return False
+    d = lambda s: datetime.strptime(s, '%Y-%m-%d').date()   # noqa: E731
+    return (d(ymd) - d(last)).days >= NEW_GROUP_GAP
 
 
 # ---------------------------------------------------------------- ページの読み取り
@@ -136,9 +144,14 @@ class Run:
         if os.path.exists(RESULTS):
             with open(RESULTS, encoding='utf-8') as fp:
                 res = json.load(fp)
-        wk = meet_week(today)
-        self.res = [h for h in res.get('horses', []) if meet_week(h['date']) == wk]   # 新しい開催週になったら前の週は消す
-        self.days = [d for d in res.get('days', []) if meet_week(d['date']) == wk]
+        old_h, old_d = res.get('horses', []), res.get('days', [])
+        last = max([h['date'] for h in old_h] + [d['date'] for d in old_d], default='')
+        if self.mine and new_group(last, today):
+            # 新しい開催のまとまりで、今日クラブ馬が走る → 前の開催の結果を消す（それまでは残す。レースのない日は何も消さない）
+            self.res, self.days = [], []
+            self.log(f'新しい開催のまとまり（前の開催日 {last}）なので、前の結果を消す')
+        else:
+            self.res, self.days = list(old_h), list(old_d)
         if today in self.held and not any(d['date'] == today for d in self.days):
             self.days.append({'date': today, 'venues': self.held[today]})
             self.days.sort(key=lambda d: d['date'])
@@ -332,12 +345,16 @@ def git_publish(label):
     def git(*a, check=True):
         return subprocess.run(['git', *a], capture_output=True, text=True, check=check)
     git('add', 'data/results.json')
-    if git('diff', '--cached', '--quiet', check=False).returncode == 0:
+    if git('diff', '--cached', '--quiet', check=False).returncode != 0:
+        git('commit', '-q', '-m', f'{label} {datetime.now(JST):%m/%d %H:%M}')
+    # 前に push できなかったコミットが残っていれば、中身が変わっていなくても送る（10/26〜。以前は「差分なし＝成功」と
+    # みなしていたため、push に失敗したコミットが送られないままジョブが終わることがあった）
+    if git('rev-list', '--count', 'origin/main..HEAD', check=False).stdout.strip() == '0':
         return True
-    git('commit', '-q', '-m', f'{label} {datetime.now(JST):%m/%d %H:%M}')
     for i in range(3):
-        git('pull', '--rebase', '-q', 'origin', 'main', check=False)
-        if git('push', '-q', 'origin', 'HEAD:main', check=False).returncode == 0:
+        if git('pull', '--rebase', '-q', 'origin', 'main', check=False).returncode != 0:
+            git('rebase', '--abort', check=False)   # 取り込みに失敗した時は途中の状態を残さない（次の git 操作が止まるため）
+        elif git('push', '-q', 'origin', 'HEAD:main', check=False).returncode == 0:
             return True
         time.sleep(5 * (i + 1))
     print('::warning::results.json の push に失敗（次の機会にまとめる）', flush=True)

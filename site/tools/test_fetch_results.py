@@ -3,7 +3,7 @@
 偽のページの形は、10/24 の見張りで保存した本物のページ（結果トップ・開催のページ・全レースまとめ）に合わせている。
 結果は発走の10分後に上位5頭だけ（2着以下のタイム・推定上りは空）、13分後に全頭が載る（10/24 の見張りの結果）。
 """
-import json, os, sys, tempfile, unittest, warnings
+import json, os, subprocess, sys, tempfile, unittest, warnings
 from datetime import datetime, timedelta
 from unittest import mock
 
@@ -198,17 +198,57 @@ class TestFetchResults(unittest.TestCase):
         self.assertEqual(self.run_(c, j, until=c.now().replace(hour=13)), {'pending': 0})
         self.assertEqual(sum(1 for x in j.requests if x.startswith('pw01srl')), 3)   # 9:58 に開催のページ（リンクなし）→ 読み直しても まだ → 10:01 に読み直してリンクあり
 
-    def test_new_week_clears_old(self):
-        """新しい開催週の最初の取得で、前の週の結果は消す（ページも最新の開催週だけを出す）"""
-        json.dump({'days': [{'date': '2026-10-18', 'venues': ['東京']}], 'horses': [horse('05', 1, '2023000001', '10:05') | {'date': '2026-10-18', 'finish': '1'}]},
+    def old_results(self, *dates):
+        json.dump({'days': [{'date': d, 'venues': ['東京']} for d in dates],
+                   'horses': [horse('05', 1, f'202300000{i}', '10:05') | {'date': d, 'finish': '1', 'rtime': '1:35.8', 'last3f': '34.0'} for i, d in enumerate(dates)]},
                   open(fx.RESULTS, 'w', encoding='utf-8'), ensure_ascii=False)
-        self.write_races([horse('05', 1, '2024000001', '10:05') | {'date': '2026-10-25'}],
-                         days=[{'date': DAY, 'venues': ['東京']}, {'date': '2026-10-25', 'venues': ['東京']}])
+
+    def test_new_group_clears_old(self):
+        """前の開催日から4日以上あいた日にクラブ馬が走る時、その日の最初の取得で前の開催の結果を消す"""
+        self.old_results('2026-10-17', '2026-10-18')
+        self.write_races([horse('05', 1, '2024000001', '10:05')])   # 今日（10/24 土）
         c = FakeClock('08:00')
-        self.run_(c, FakeJRA(c, {}), until=c.now().replace(hour=13))
+        pushed = []
+        self.run_(c, FakeJRA(c, {}), publish=lambda label: pushed.append(label) or True, until=c.now())
         r = self.results()
         self.assertEqual(r['horses'], [])
         self.assertEqual([d['date'] for d in r['days']], [DAY])
+        self.assertEqual(len(pushed), 1)
+
+    def test_keep_until_next_meeting(self):
+        """レースのない日（火曜〜金曜）は前の開催の結果を消さない（10/26 修正。以前は火曜の朝に消していた）"""
+        self.old_results('2026-10-17', '2026-10-18')
+        self.write_races([horse('05', 1, '2024000001', '10:05') | {'date': '2026-10-25'}],
+                         days=[{'date': '2026-10-25', 'venues': ['東京']}])
+        for day in range(19, 24):   # 10/19（月）〜10/23（金）、10/24（土）もクラブ馬がいなければ消さない
+            c = FakeClock('07:40'); c.t = c.t.replace(day=day)
+            pushed = []
+            self.assertEqual(self.run_(c, FakeJRA(c, {}), publish=lambda label: pushed.append(label) or True, until=c.now().replace(hour=13)), {'pending': 0})
+            self.assertEqual(pushed, [], day)
+            self.assertEqual(sorted(h['date'] for h in self.results()['horses']), ['2026-10-17', '2026-10-18'], day)
+
+    def test_substitute_tuesday_same_group(self):
+        """代替開催の火曜（日曜から2日）は前の土日と同じまとまり。土日の結果を残したまま火曜の分を足す"""
+        self.old_results('2026-10-17', '2026-10-18')
+        tue = '2026-10-20'
+        self.write_races([horse('05', 1, '2024000001', '10:05') | {'date': tue}], days=[{'date': tue, 'venues': ['東京']}])
+        c = FakeClock('08:00'); c.t = c.t.replace(day=20)
+        run = fx.Run(FakeJRA(c, {}), c, None, log=self.logs.append)
+        run.run(until=c.now())
+        self.assertEqual(sorted(h['date'] for h in run.res), ['2026-10-17', '2026-10-18'])
+        self.assertEqual([d['date'] for d in run.days], ['2026-10-17', '2026-10-18', tue])
+        self.assertEqual(sorted(h['date'] for h in self.results()['horses']), ['2026-10-17', '2026-10-18'])
+
+    def test_new_group_rule(self):
+        """新しい開催のまとまりかどうかは日付の間隔（4日以上）だけで決める"""
+        self.assertTrue(fx.new_group('2026-10-18', '2026-10-24'))    # 日曜 → 次の土曜
+        self.assertTrue(fx.new_group('2026-10-26', '2026-10-31'))    # 3日間開催の月曜 → 次の土曜
+        self.assertTrue(fx.new_group('2026-10-20', '2026-10-24'))    # 代替の火曜 → 次の土曜
+        self.assertTrue(fx.new_group('2026-12-28', '2027-01-04'))    # 年末 → 年始
+        self.assertFalse(fx.new_group('2026-10-24', '2026-10-26'))   # 土曜 → 3日間開催の月曜
+        self.assertFalse(fx.new_group('2026-10-17', '2026-10-20'))   # 土曜 → 代替の火曜（日曜が中止）
+        self.assertFalse(fx.new_group('2026-10-25', '2026-10-24'))   # 前の日を取り直す仕上げ
+        self.assertFalse(fx.new_group('', '2026-10-24'))
 
     def test_push_limit(self):
         """push は1時間に8回まで（終わる時の1回を除く）。超える分は次の機会にまとめる"""
@@ -268,9 +308,47 @@ class TestFetchResults(unittest.TestCase):
         self.assertFalse(fx.row_done({'finish': '1', 'rtime': '1:35.8', 'last3f': ''}))
         self.assertTrue(fx.row_done({'finish': '中止'}))
         self.assertTrue(fx.row_done({'finish': '3', 'rtime': '1:36.0', 'last3f': '34.5'}))
-        self.assertEqual(fx.meet_week('2026-10-24'), '2026-10-20')
-        self.assertEqual(fx.meet_week('2026-10-26'), '2026-10-20')   # 3日間開催の月曜は同じ週
-        self.assertEqual(fx.meet_week('2026-10-27'), '2026-10-27')
+
+
+class TestGitPublish(unittest.TestCase):
+    """git_publish: push に失敗したコミットを、次の機会に（中身が同じでも）送る（10/26 修正）"""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); t = self.tmp.name
+        env = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@users.noreply.github.com', 'GIT_COMMITTER_NAME': 't',
+               'GIT_COMMITTER_EMAIL': 't@users.noreply.github.com', 'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+        self.env = mock.patch.dict(os.environ, env); self.env.start()
+        sh = lambda *a, cwd=t: subprocess.run(a, cwd=cwd, check=True, capture_output=True)   # noqa: E731
+        self.sh = sh
+        sh('git', 'init', '-q', '--bare', '-b', 'main', 'origin.git')
+        sh('git', 'clone', '-q', 'origin.git', 'w')
+        self.w = os.path.join(t, 'w'); os.makedirs(os.path.join(self.w, 'data'))
+        self.write('{}')
+        sh('git', 'add', '-A', cwd=self.w); sh('git', 'commit', '-qm', 'init', cwd=self.w); sh('git', 'push', '-q', 'origin', 'HEAD:main', cwd=self.w)
+        self.cwd = os.getcwd(); os.chdir(self.w)
+        self.sleep = mock.patch.object(fx.time, 'sleep', lambda s: None); self.sleep.start()
+
+    def tearDown(self):
+        os.chdir(self.cwd); self.sleep.stop(); self.env.stop(); self.tmp.cleanup()
+
+    def write(self, s):
+        open(os.path.join(self.w, 'data', 'results.json'), 'w').write(s)
+
+    def remote(self):
+        return subprocess.run(['git', '--git-dir', os.path.join(self.tmp.name, 'origin.git'), 'show', 'main:data/results.json'],
+                              capture_output=True, text=True, check=True).stdout
+
+    def test_retry_unpushed_commit(self):
+        hook = os.path.join(self.tmp.name, 'origin.git', 'hooks', 'pre-receive')
+        open(hook, 'w').write('#!/bin/sh\nexit 1\n'); os.chmod(hook, 0o755)
+        self.write('{"a":1}')
+        with mock.patch('builtins.print'):
+            self.assertFalse(fx.git_publish('結果を更新'))   # 拒否される
+        os.remove(hook)
+        self.assertEqual(self.remote(), '{}')
+        self.assertTrue(fx.git_publish('結果を更新'))      # 中身は同じでも、残っているコミットを送る
+        self.assertEqual(self.remote(), '{"a":1}')
+        self.assertTrue(fx.git_publish('結果を更新'))      # 何もなければ何もしない
+        self.assertEqual(self.remote(), '{"a":1}')
 
 
 if __name__ == '__main__':

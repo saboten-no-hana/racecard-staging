@@ -348,8 +348,14 @@ const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本�
 const uid = () => Math.random().toString(36).slice(2,9);
 const ymd = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 const todayYmd = () => ymd(new Date());
-/* 開催週: 火曜〜翌月曜（出走カードと同じ）。返り値はその週の火曜の日付 */
+/* 開催週: 火曜〜翌月曜（出走カードと同じ）。返り値はその週の火曜の日付。結果のデータがない時だけ使う */
 function meetWeek(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); if(!m) return ''; const d=new Date(+m[1],m[2]-1,+m[3]); d.setDate(d.getDate()-(d.getDay()+5)%7); return ymd(d); }
+/* 開催のまとまり（10/26〜）: 前の開催日から GROUP_GAP 日以上あいた日から新しいまとまり。曜日では決めない（tools/fetch_results.py の NEW_GROUP_GAP と同じ）。
+   3日間開催の月曜・代替開催の火曜は前の土日と同じまとまり、年末年始の変則日程も日付の間隔だけで分ける。返り値はいちばん新しいまとまりの最初の日 */
+const GROUP_GAP=4;
+const dayNo=s=>{ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?Date.UTC(+m[1],m[2]-1,+m[3])/864e5:NaN; };
+function groupStart(dates){ const ds=[...new Set(dates.filter(d=>!isNaN(dayNo(d))))].sort(); let s=ds[0]||'';
+  for(let i=1;i<ds.length;i++) if(dayNo(ds[i])-dayNo(ds[i-1])>=GROUP_GAP) s=ds[i]; return s; }
 
 /* ---------- 着順・人気 ---------- */
 const MEDAL={1:{bg:'#d9a520',fg:'#2a1e00'},2:{bg:'#a7b0b8',fg:'#1b2228'},3:{bg:'#b8743c',fg:'#ffffff'}};
@@ -699,8 +705,8 @@ $('#post').addEventListener('click',async()=>{ const st=$('#status'); st.textCon
 
 /* ---------- 今週の結果（data/results.json と data/races.json） ---------- */
 /* 一覧は「結果の載った馬」と「今日までに走る（走った）クラブ馬」を合わせたもの。結果がまだの馬は「結果待ち」。
-   いちばん新しい開催週の分だけを出す（results.json に前の週の結果が残っている時のため） */
-let POOL=[], RESU=null;
+   いちばん新しい開催のまとまりの分だけを出す（10/26〜。以前は開催週＝火〜翌月曜で分けていた） */
+let POOL=[], RESU=null, GS='';   /* GS: いちばん新しい開催のまとまりの最初の日 */
 function raceLabel(x){
   if(x.grade) return `${x.raceName}（${x.grade}）`;
   const c=x.cls||''; if(!c||c==='新馬'||c==='未勝利'||String(x.raceName).includes(c)) return x.raceName;
@@ -718,8 +724,8 @@ async function loadData(){
   ((res&&res.horses)||[]).forEach(x=>m.set(keyOf(x),{...(m.get(keyOf(x))||{}),...x}));
   [...((races&&races.days)||[]),...((res&&res.days)||[])].forEach(d=>HELD[d.date]=d.venues);
   let all=[...m.values()];
-  const wk=all.reduce((a,x)=>{ const w=meetWeek(x.date); return w>a?w:a; },'');
-  POOL=all.filter(x=>meetWeek(x.date)===wk);
+  GS=groupStart(all.map(x=>x.date));
+  POOL=all.filter(x=>x.date>=GS);
   if(res&&res.updated){ const t=new Date(res.updated); U.textContent=`結果 ${t.getMonth()+1}/${t.getDate()} ${pad2(t.getHours())}:${pad2(t.getMinutes())} 更新`; }
   else U.textContent=POOL.length?'結果はまだありません':'';
   const counts={}; POOL.forEach(x=>counts[x.clubId]=(counts[x.clubId]||0)+1);
@@ -739,16 +745,17 @@ function syncFromData(){ let n=0;
     if(ch) n++; });
   return n; }
 function addFromData(xs){ if(!xs.length) return; xs.forEach(x=>{ if(!inList(x)) state.horses.push(fromData(x)); }); renderList(); schedule(); save(); }
-/* 出走カードに入れた馬（racecard.v2 の horses）のうち、この開催週の馬。結果があれば着順も入れる */
-function cardHorses(){ const wk=POOL.length?meetWeek(POOL[0].date):meetWeek(todayYmd()), today=todayYmd();
-  return (Array.isArray(CARD.horses)?CARD.horses:[]).filter(h=>h.name&&h.date&&h.date<=today&&meetWeek(h.date)===wk&&!state.horses.some(x=>(h.horseId&&x.horseId===h.horseId&&x.date===h.date)||(!h.horseId&&x.name===h.name&&x.date===h.date))); }
+/* 出走カードに入れた馬（racecard.v2 の horses）のうち、いまの開催のまとまりの馬（データがない時は今の開催週）。結果があれば着順も入れる */
+const inCur=d=>GS?d>=GS:meetWeek(d)===meetWeek(todayYmd());
+function cardHorses(){ const today=todayYmd();
+  return (Array.isArray(CARD.horses)?CARD.horses:[]).filter(h=>h.name&&h.date&&h.date<=today&&inCur(h.date)&&!state.horses.some(x=>(h.horseId&&x.horseId===h.horseId&&x.date===h.date)||(!h.horseId&&x.name===h.name&&x.date===h.date))); }
 function importCard(){ const hs=cardHorses(); if(!hs.length) return;
   hs.forEach(h=>{ const x=h.horseId&&POOL.find(y=>y.horseId===h.horseId&&y.date===h.date);
     state.horses.push({id:uid(),horseId:h.horseId||'',name:h.name,clubId:h.clubId||'',ownerLabel:h.ownerLabel||'',date:h.date,venue:h.venue||'',r:String(h.r||''),time:h.time||'',
       raceName:h.raceName||'',surface:h.surface||'芝',dist:String(h.dist||''),jockey:h.jockey||'',sexAge:h.sexAge||'',weight:h.weight||'',
       finish:x&&x.finish||'',pop:x&&x.pop?String(x.pop):'',status:(x&&x.status)||h.status||'',customSilks:h.customSilks||null}); });
   renderList(); schedule(); save(); }
-const isOld=h=>!!h.date&&meetWeek(h.date)<(POOL.length?meetWeek(POOL[0].date):meetWeek(todayYmd()));
+const isOld=h=>!!h.date&&(GS?h.date<GS:meetWeek(h.date)<meetWeek(todayYmd()));
 function renderPicker(){
   const L=$('#p-list'), B=$('#p-banners');
   const club=$('#p-club').value, q=($('#p-q').value||'').trim(), mine=$('#p-mine').checked;
