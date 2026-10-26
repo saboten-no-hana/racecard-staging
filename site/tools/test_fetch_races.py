@@ -127,6 +127,18 @@ class Base(unittest.TestCase):
 
 
 class TestFetch(Base):
+    def test_jockey_mark(self):
+        """騎手の減量記号は「▲ 名前」の形で取り込む（出馬表の書き方は 10/26 に本物の先週分で確認）"""
+        html = ('<table><tbody>'
+                '<tr><td class="horse"><a href="/JRADB/accessU.html?CNAME=pw01dud002023100001/AA">ウマ</a></td>'
+                '<td class="jockey"><span class="mark jockey" title="3kg減量">▲</span><a href="#" onclick="return doAction(\'/JRADB/accessK.html\', \'pw04kmk001218/8D\');">遠藤 汰月</a></td></tr>'
+                '<tr><td class="horse"><a href="/JRADB/accessU.html?CNAME=pw01dud002023100002/AA">ウマ2</a></td>'
+                '<td class="jockey"><a href="#">菅原 明良</a></td></tr>'
+                '</tbody></table>')
+        from bs4 import BeautifulSoup
+        rows = fr.parse_rows(BeautifulSoup(html, 'html.parser').select_one('table'))
+        self.assertEqual([h['jockey'] for h in rows], ['▲ 遠藤 汰月', '菅原 明良'])
+
     def test_club_horses_only_and_fields(self):
         """クラブ名義の馬だけを出力し、性齢・斤量・馬番も入る。個人馬主の名前は保存しない"""
         jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 11, 'umaban': True,

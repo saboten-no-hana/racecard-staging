@@ -179,8 +179,10 @@ def parse_rows(table):
         m = re.match(r'\s*(\d+)', num.get_text() if num else '')
         h['umaban'] = m.group(1) if m else ''
         h['owner'] = text(tr.select_one('p.owner'))
-        jk = tr.select_one('p.jockey a') or tr.select_one('td.jockey a')
-        h['jockey'] = text(jk)
+        jc = tr.select_one('p.jockey') or tr.select_one('td.jockey')
+        mark = text(jc.select_one('span.mark')) if jc else ''   # 減量記号（▲△☆◇★）。<span class="mark jockey" title="3kg減量">▲</span><a>名前</a>
+        name = text(jc.select_one('a') if jc else None)
+        h['jockey'] = f'{mark} {name}' if mark and name else name   # 結果ページと同じ「▲ 遠藤 汰月」の形（10/26〜。以前は記号を読んでいなかった）
         age = tr.select_one('p.age') or tr.select_one('td.age')
         h['sexAge'] = text(age).split('/')[0]
         m = re.search(r'(\d+(?:\.\d)?)', text(tr.select_one('td.weight')))   # 負担重量（斤量）「55.0 kg」

@@ -221,7 +221,7 @@ a.inl{color:var(--accent);font-weight:700}
   <section class="editor" aria-label="結果の入力">
     <section class="picker" id="picker" aria-label="今週の結果から選ぶ">
       <div class="picker-head"><h2>今週の結果から選ぶ</h2><span class="upd" id="p-upd">結果を読み込み中…</span></div>
-      <div class="pstate" id="p-state" role="status"><p id="p-state-msg">結果は各レースの20〜30分ほど後に載ります。</p><button type="button" id="p-reload">最新を読み込む</button></div>
+      <div class="pstate" id="p-state" role="status"><p id="p-state-msg">結果は各レースの発走から20〜30分ほど後に載ります。</p><button type="button" id="p-reload">最新を読み込む</button></div>
       <div id="p-banners"></div>
       <div class="picker-filters">
         <label class="fld"><span>クラブ</span><select id="p-club"></select></label>
@@ -367,8 +367,6 @@ function finishInfo(h){ const f=finishOf(h), n=parseInt(f,10);
   if(n>0&&String(n)===f) return {num:String(n),unit:'着',n,medal:MEDAL[n]||null};
   if(f) return {num:f,unit:'',n:0,medal:null,special:true};
   return {num:'–',unit:'',n:0,medal:null,pending:true}; }
-/* 騎手名の減量記号（▲△☆◇★）は外す（10/26〜、私の判断。出馬表＝出走カードの表記にそろえる。results.json には結果ページのまま残す） */
-const jk=s=>String(s||'').replace(/^[▲△☆◇★◆]\s*/,'');
 const popText=h=>{ const p=parseInt(h.pop,10); return p>0?`${p}番人気`:''; };
 const ran=h=>!NOT_RUN.has(finishOf(h));
 function tally(hs){ const t=[0,0,0,0]; let any=false;
@@ -435,7 +433,7 @@ function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(out){ ctx.fillRect(tx,cy+sB*.86-sB*.34,nm.w,Math.max(2,sB*.07)); }
   cy+=sB+g;
   const c=fit(ctx,hr.raceName||'',700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
-  const ld=[(hr.surface||'')+(hr.dist?hr.dist+'m':''), jk(hr.jockey)].filter(Boolean).join('　');
+  const ld=[(hr.surface||'')+(hr.dist?hr.dist+'m':''), hr.jockey].filter(Boolean).join('　');
   const d=fit(ctx,ld,500,F.body,sD,tw); ctx.fillStyle=T.sub; ctx.fillText(d.t,tx,cy+sD*.86);
 }
 
@@ -724,7 +722,7 @@ async function loadData(){
   const U=$('#p-upd'); const [res,races]=await Promise.all([getJson('data/results.json'),getJson('data/races.json')]);
   RESU=res; const m=new Map(), today=todayYmd(); HELD={};
   ((races&&races.horses)||[]).filter(x=>x.date<=today).forEach(x=>m.set(keyOf(x),{...x,finish:'',pop:''}));
-  ((res&&res.horses)||[]).forEach(x=>m.set(keyOf(x),{...(m.get(keyOf(x))||{}),...x,jockey:jk(x.jockey)}));
+  ((res&&res.horses)||[]).forEach(x=>m.set(keyOf(x),{...(m.get(keyOf(x))||{}),...x}));
   [...((races&&races.days)||[]),...((res&&res.days)||[])].forEach(d=>HELD[d.date]=d.venues);
   let all=[...m.values()];
   GS=groupStart(all.map(x=>x.date));
