@@ -8,13 +8,16 @@
 - races.json に今日の開催がない日は JRA に1回もアクセスしない
 - 結果が取れるたびに results.json を書き、--push の時は1レースごとにコミットして push する（10/24、私の指定）。
   Pages の反映は1時間に10回までの目安があるので、1時間に8回を超えそうな時は次の機会にまとめる（終わる時の1回は残さず push）
-- 1開催日のリクエスト数の見込み: 40〜45（結果トップ・開催のページ 最大7＋クラブ馬の出るレース30〜35＋読み直し数回）
+- 1開催日のリクエスト数の見込み: 40〜50（結果トップ・開催のページ 最大7＋クラブ馬の出るレース30〜35＋読み直し数回。回が変わるたびに最大4ほど増える）
 - 通信エラー（10/26〜）: 1つの読みが失敗しても回ごと止めず3分後に読み直す。3回続けて失敗したらその回は止め、代わりの回を1回だけ
   起動する（15分待ってから読む）。その回も止まったら、予備の定期実行と仕上げに任せる。通常時のリクエスト数は変わらない
+- 開催中止（10/26〜）: 同じ場のレースが2つ続けて発走40分後まで何も載らなければ、その回ではその場を読まない（仕上げに任せる）。
+  中止の場は結果トップに最後まで載らず、以前はレースごとに読み直しが続いていた（12レースで結果トップ109回の試算 → 1回あたり十数回）
 
 使い方:
   python3 tools/fetch_results.py --auto [--push] [--pending-flag PATH] [--after-error]   その日の残りのレースを取る（10/26〜。午前・午後の区別なし）
-      起動から5時間半（ジョブの上限の手前）か 18:00 の早い方まで。時間切れで残りがあれば PATH を作る（次の回を起動する合図）
+      起動から5時間半（ジョブの上限の手前）か、18:00 と「最終レースの発走45分後」の遅い方の、早い方まで（2027年夏の1日7競走は
+      最終レースが18:30ごろ）。時間切れで残りがあれば PATH を作る（次の回を起動する合図）
       読み取りの失敗は3分後に読み直し、3回続けて失敗したら止めて PATH に 'error' と書く（次の回は --after-error で、15分待ってから読む。
       その回がまた止まった時は起動しない）
   python3 tools/fetch_results.py --until 13:00 [--push]                  終わりの時刻を指定して取る（テスト・手動用）
@@ -46,6 +49,9 @@ DAY_END = (18, 0)    # --auto で読むのはこの時刻まで（以後は 19:0
 PUSH_PER_HOUR = 8    # Pages の反映の目安（1時間に10回）より少なめ
 MAX_FAILS = 3        # 読み取りがこの回数続けて失敗したら、その回は止める（10/26〜。1回の失敗では止めずに RETRY 分後に読み直す）
 AFTER_ERROR_WAIT = 15  # 失敗で止まった回の代わりに起動した回は、この分数だけ待ってから読み始める（すぐ読んでも同じ失敗になりやすいため）
+STOP_BLANK = 2       # 同じ場のレースがこの数だけ続けて「発走 GIVE_UP 分後まで何も載らない」なら、その回ではその場を読むのをやめる
+                     # （10/26〜。雪・台風で開催中止になった場は結果トップに最後まで載らず、レースごとに読み直しが続いていた。仕上げに任せる）
+LAST_RACE_MARGIN = GIVE_UP + 5   # --auto は、最終レースの発走からこの分数までは読む（10/26〜。2027年夏の1日7競走は最終レースが18:30ごろ）
 CODE = {v: k for k, v in VENUES.items()}
 RACE_FIELDS = ('key', 'horseId', 'name', 'clubId', 'date', 'venue', 'r', 'time', 'raceName', 'grade', 'cls', 'surface', 'dist', 'status')
 
@@ -142,6 +148,9 @@ class Run:
         self.kai_of = {}                  # 場 → 開催のページ（全レースまとめのリンクがまだなかった時に読み直す）
         self.day = None                   # 対象の日（YYYY-MM-DD）
         self.errors = 0                   # 読み取りに失敗した回数（通信エラーなど）
+        self.capped = False               # --auto の終わりが時間切れ（ジョブの上限）によるものか
+        self.blank = {}                   # 場 → 続けて「何も載らないまま発走 GIVE_UP 分後」になったレースの数
+        self._top = None                  # この読みのサイクルで読んだ結果トップ（同じサイクルで二度読まない）
 
     # ---- データ
     def load(self, today):
@@ -221,7 +230,7 @@ class Run:
     def meetings(self, venues, today):
         """結果トップ → 今日の開催のページ → {場: 全レースまとめの cname}（クラブ馬の出る場だけ）"""
         ymd8 = today.replace('-', '')
-        top = self.f.get(TOP, post=True, path=PATH)
+        top = self._top = self.f.get(TOP, post=True, path=PATH)
         kai = [c for c in s_links(top, 'pw01srl') if c.split('/')[0].endswith(ymd8)]
         if not s_links(top, 'pw01srl'):
             self.notes.append('結果トップに開催のリンクが1つもない（ページの形式が変わった？）')
@@ -246,10 +255,11 @@ class Run:
         if not ses.get(v):
             ymd8 = self.day.replace('-', '')   # 日付を指定した仕上げでも、その日の開催を探す（10/26 修正。以前は今日の日付）
             c = self.kai_of.get(v)
-            if not c:   # 結果トップに まだ載っていなかった場 → トップを読み直す
-                self.f.memo = {}
-                top = self.f.get(TOP, post=True, path=PATH)
-                c = next((k for k in s_links(top, 'pw01srl') if k.split('/')[0].endswith(ymd8) and k[9:11] == CODE.get(v)), None)
+            if not c:   # 結果トップに まだ載っていなかった場 → トップを読み直す（同じサイクルでは1回だけ。10/26〜）
+                if self._top is None:
+                    self.f.memo = {}
+                    self._top = self.f.get(TOP, post=True, path=PATH)
+                c = next((k for k in s_links(self._top, 'pw01srl') if k.split('/')[0].endswith(ymd8) and k[9:11] == CODE.get(v)), None)
                 if c:
                     self.kai_of[v] = c
             if c:
@@ -282,7 +292,8 @@ class Run:
                 self.done_at[(v, r)] = int((self.clock.now() - race['time']).total_seconds() // 60)
         return newly
 
-    def run(self, until=None, final=False, date=None):
+    def run(self, until=None, final=False, date=None, auto_start=None):
+        """auto_start: --auto の時の起動時刻。終わりの時刻はレースの一覧を読んでから auto_until() で決める（until は使わない）"""
         now = self.clock.now(); today = now.date().isoformat()
         if final and not date and now.hour < 12:
             date = (now.date() - timedelta(days=1)).isoformat()   # 仕上げが日付をまたいで動いた時は前の日の分
@@ -306,6 +317,9 @@ class Run:
             self.flush('結果を整理')
             return {'pending': 0}
         venues = sorted({v for v, _ in pending}, key=lambda v: CODE.get(v, '99'))
+        if auto_start and not final:
+            until, self.capped = auto_until(auto_start, max(r['time'] for r in races.values()))
+            self.log(f'{until:%H:%M} まで（{"時間切れなら次の回に引き継ぐ" if self.capped else "あとは仕上げ"}）')
         if final:
             ses = self.meetings(venues, today)
             for v in venues:
@@ -333,6 +347,7 @@ class Run:
                     break
                 self.clock.sleep((wake - now).total_seconds())
                 continue
+            self._top = None   # 結果トップは1回の読みのサイクルで1回まで
             try:
                 if ses is None:
                     ses = self.meetings(venues, today)
@@ -352,13 +367,25 @@ class Run:
                 if fails >= MAX_FAILS:
                     raise
             now = self.clock.now()
-            for k in list(pending):
+            for k in sorted(pending, key=lambda k: pending[k]['time']):
+                if k not in pending:
+                    continue   # 下でその場ごと打ち切った
                 if self.complete(pending[k]):
+                    self.blank[k[0]] = 0
                     del pending[k]; del next_try[k]
                 elif next_try[k] <= now:
                     if now - pending[k]['time'] >= timedelta(minutes=GIVE_UP):
                         self.notes.append(f'{k[0]}{k[1]}R: 発走{GIVE_UP}分後までにそろわなかった（仕上げで拾う）')
+                        nothing = all(self.entry(h) is None for h in pending[k]['horses'])   # 上位5頭の段階も含めて何も載らなかった
+                        self.blank[k[0]] = self.blank.get(k[0], 0) + 1 if nothing else 0
                         del pending[k]; del next_try[k]
+                        if self.blank[k[0]] >= STOP_BLANK:
+                            # 開催中止などで、その場の結果が載らない。この回ではその場を読むのをやめる（10/26〜）
+                            rest = sorted(x for x in pending if x[0] == k[0])
+                            for x in rest:
+                                del pending[x]; del next_try[x]
+                            self.notes.append(f'{k[0]}: {STOP_BLANK}レース続けて結果が何も載らないので、この回ではこの場を読まない（開催中止？）'
+                                              + (f'。残り {"・".join(f"{r}R" for _, r in rest)} は仕上げで拾う' if rest else ''))
                     else:
                         next_try[k] = now + timedelta(minutes=RETRY)
             if self.dirty:
@@ -393,10 +420,15 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv[:-1] else default
 
 
-def auto_until(now):
-    """--auto の終わりの時刻と、それが時間切れ（ジョブの上限）によるものか。18:00 を過ぎてからの起動は読める分だけ読んで終わる"""
-    end = now.replace(hour=DAY_END[0], minute=DAY_END[1], second=0, microsecond=0)
-    cap = now + timedelta(minutes=AUTO_SPAN)
+def auto_until(start, last=None):
+    """--auto の終わりの時刻と、それが時間切れ（ジョブの上限）によるものか。
+    start は起動時刻（代わりの回が15分待つ前の時刻。待った分もジョブの上限に入るため。10/26 修正）。
+    終わりは 18:00 か「最終レース last の発走＋LAST_RACE_MARGIN 分」の遅い方（10/26〜。2027年夏の1日7競走は最終レースが18:30ごろ）。
+    ふだんの日は最終レースが16時台なので 18:00 のまま。終わりを過ぎてからの起動は読める分だけ読んで終わる"""
+    end = start.replace(hour=DAY_END[0], minute=DAY_END[1], second=0, microsecond=0)
+    if last:
+        end = max(end, last + timedelta(minutes=LAST_RACE_MARGIN))
+    cap = start + timedelta(minutes=AUTO_SPAN)
     return (cap, True) if cap < end else (end, False)
 
 
@@ -424,15 +456,15 @@ def next_run(auto, capped, after_error, code, pending):
 
 def main():
     clock = Clock()
-    until, capped = None, False
+    until = None
+    auto = '--auto' in sys.argv
+    start = clock.now()   # 終わりの時刻はこの時刻から数える（代わりの回が待つ15分もジョブの上限に入るため。10/26 修正。以前は待った後から数えていた）
     after_error = '--after-error' in sys.argv
-    if after_error and '--auto' in sys.argv:
+    if after_error and auto:
         print(f'前の回が読み取りの失敗で止まったので、{AFTER_ERROR_WAIT}分待ってから読み始める', flush=True)
         clock.sleep(AFTER_ERROR_WAIT * 60)
-    if '--auto' in sys.argv:
-        until, capped = auto_until(clock.now())
-        print(f'{until:%H:%M} まで（{"時間切れなら次の回に引き継ぐ" if capped else "あとは仕上げ"}）', flush=True)
-    elif arg('--until'):
+    # --auto の終わりの時刻は Run.run() がレースの一覧を読んでから決める（最終レースの発走に合わせるため）
+    if not auto and arg('--until'):
         h, m = map(int, arg('--until').split(':'))
         until = clock.now().replace(hour=h, minute=m, second=0, microsecond=0)
     push = '--push' in sys.argv
@@ -441,12 +473,12 @@ def main():
         print('::warning::main 以外のブランチで動いているので、results.json は push しない', flush=True)
         push = False
     f = Fetcher(arg('--offline'))
-    run = Run(f, clock, git_publish if push else None)
+    run = Run(f, clock, git_publish if push else None, log=lambda s: print(s, flush=True))
     try:
         date = arg('--date')
         if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date):
             raise ValueError(f'日付の形が違う: {date}（YYYY-MM-DD）')
-        st = run.run(until=until, final='--final' in sys.argv, date=date or None)
+        st = run.run(until=until, final='--final' in sys.argv, date=date or None, auto_start=start if auto else None)
         code = 0
         if run.errors and st['pending'] > 0 and '--final' in sys.argv:
             print('::error::仕上げで読めなかった場があり、そろっていないレースが残った', flush=True)
@@ -455,7 +487,7 @@ def main():
         print(f'::error::結果の取得中にエラー: {e!r}', flush=True)
         run.flush('結果を更新', force=True)
         st, code = {'pending': -1}, 1
-    nxt = next_run('--auto' in sys.argv, capped, after_error, code, st['pending'])
+    nxt = next_run(auto, run.capped, after_error, code, st['pending'])
     if arg('--pending-flag') and nxt:
         open(arg('--pending-flag'), 'w').write(nxt)
     mins = '、'.join(f'{v}{r}R {m}分' for (v, r), m in sorted(run.done_at.items(), key=lambda kv: (CODE.get(kv[0][0], '99'), kv[0][1])))

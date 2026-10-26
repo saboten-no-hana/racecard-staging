@@ -319,6 +319,80 @@ class TestFetchResults(unittest.TestCase):
         self.assertEqual(fx.auto_until(at('11:20')), (at('16:50'), True))
         self.assertEqual(fx.auto_until(at('13:20')), (at('18:00'), False))
         self.assertEqual(fx.auto_until(at('19:30')), (at('18:00'), False))   # 遅れて 18 時以降に起動した予備の回は、読める分だけ読んで終わる
+        # 最終レースに合わせる（10/26〜）: ふだんの日（最終 16:25）は 18:00 のまま。2027年夏の1日7競走（最終 18:30ごろ）は 19:15 まで
+        self.assertEqual(fx.auto_until(at('13:20'), at('16:25')), (at('18:00'), False))
+        self.assertEqual(fx.auto_until(at('15:20'), at('18:30')), (at('19:15'), False))
+        self.assertEqual(fx.auto_until(at('13:20'), at('18:30')), (at('18:50'), True))   # 5時間半で時間切れ → 次の回へ
+        self.assertEqual(fx.auto_until(at('07:40'), at('18:30')), (at('13:10'), True))
+
+    def test_auto_until_from_start(self):
+        """終わりの時刻は起動時刻から数える。代わりの回が15分待っても、ジョブの上限（345分）を超えない（10/26 修正）"""
+        self.write_races([horse('05', 12, '2024000061', '16:25')])
+        c = FakeClock('08:31'); start = c.now(); c.sleep(fx.AFTER_ERROR_WAIT * 60)   # 代わりの回: 08:31 に起動して 08:46 まで待つ
+        run = fx.Run(FakeJRA(c, {}), c, None, log=self.logs.append)
+        self.assertEqual(run.run(auto_start=start), {'pending': 1})
+        self.assertTrue(run.capped)
+        self.assertEqual(c.now().strftime('%H:%M'), '08:46')   # 16:25 のレースは 14:01（起動の330分後）より後なので読まずに次の回へ
+        self.assertIn('14:01 まで（時間切れなら次の回に引き継ぐ）', self.logs)
+
+    def test_main_after_error_counts_from_start(self):
+        """main(): 代わりの回は、待つ前の時刻を起動時刻として Run.run() に渡す"""
+        c = FakeClock('08:31'); got = {}
+        def fake_run(self_, **kw):
+            got.update(kw, now=c.now()); return {'pending': 0}
+        with mock.patch.object(fx, 'Clock', lambda: c), mock.patch.object(fx.Run, 'run', fake_run), \
+                mock.patch.object(sys, 'argv', ['fetch_results.py', '--auto', '--after-error', '--offline', self.tmp.name]), \
+                mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': ''}), mock.patch('builtins.print'):
+            self.assertEqual(fx.main(), 0)
+        self.assertEqual(got['auto_start'].strftime('%H:%M'), '08:31')
+        self.assertEqual(got['now'].strftime('%H:%M'), '08:46')
+
+    def cancel_day(self, cancel_from=1):
+        """東京・阪神とも 1〜12R にクラブ馬1頭ずつ。阪神は cancel_from R 以降が中止（結果が載らない。1 なら結果トップにも載らない）"""
+        times = ['10:05', '10:35', '11:05', '11:40', '12:15', '12:50', '13:25', '14:00', '14:35', '15:10', '15:45', '16:20']
+        hs, fake = [], {}
+        for i, t in enumerate(times):
+            for code in ('05', '09'):
+                hid = f'2024{code}{i:04d}'
+                hs.append(horse(code, i + 1, hid, t))
+                if not (code == '09' and i + 1 >= cancel_from):
+                    fake[(code, i + 1)] = {'time': t, 'horses': [hid], 'finish': {hid: '3'}}
+        self.write_races(hs, days=[{'date': DAY, 'venues': ['東京', '阪神']}])
+        c = FakeClock('07:40')
+        return c, FakeJRA(c, fake)
+
+    def test_cancelled_venue_stops(self):
+        """開催中止の場（結果トップに最後まで載らない）は、2レース続けて何も載らなければその回では読まない（10/26〜）"""
+        c, j = self.cancel_day()
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(until=c.now().replace(hour=18)), {'pending': 0})
+        self.assertEqual(sum(1 for h in self.results()['horses'] if h['venue'] == '東京'), 12)   # 東京はすべて取れる
+        self.assertLessEqual(j.requests.count(fx.TOP), 20)   # 以前は 109回
+        self.assertLessEqual(j.count, 40)                     # 中止がない日は 27回
+        self.assertTrue(any('阪神: 2レース続けて' in n and '開催中止' in n for n in run.notes))
+
+    def test_cancelled_midday_stops(self):
+        """途中で中止になった場（7R以降が載らない）も、2レース続けて何も載らなければ読むのをやめる"""
+        c, j = self.cancel_day(cancel_from=7)
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(until=c.now().replace(hour=18)), {'pending': 0})
+        got = {(h['venue'], h['r']) for h in self.results()['horses']}
+        self.assertEqual({r for v, r in got if v == '阪神'}, set(range(1, 7)))
+        self.assertEqual({r for v, r in got if v == '東京'}, set(range(1, 13)))
+        self.assertTrue(any('残り 9R・10R・11R・12R は仕上げで拾う' in n for n in run.notes))
+
+    def test_one_blank_race_does_not_stop(self):
+        """何も載らないレースが1つだけ（間にほかのレースが取れる）なら、その場を読み続ける"""
+        self.write_races([horse('05', 1, '2024000071', '10:05'), horse('05', 2, '2024000072', '10:35'), horse('05', 3, '2024000073', '11:05'),
+                          horse('05', 4, '2024000074', '11:40')], days=[{'date': DAY, 'venues': ['東京']}])
+        c = FakeClock('07:40')
+        j = FakeJRA(c, {('05', 1): {'time': '10:05', 'horses': ['2024000071'], 'finish': {'2024000071': '1'}},
+                        ('05', 3): {'time': '11:05', 'horses': ['2024000073'], 'finish': {'2024000073': '2'}},
+                        ('05', 4): {'time': '11:40', 'horses': ['2024000074'], 'finish': {'2024000074': '5'}}})   # 2R だけ載らない
+        run = fx.Run(j, c, None, log=self.logs.append)
+        self.assertEqual(run.run(until=c.now().replace(hour=13)), {'pending': 0})
+        self.assertEqual(sorted(h['r'] for h in self.results()['horses']), [1, 3, 4])
+        self.assertFalse(any('開催中止' in n for n in run.notes))
 
     def test_auto_backup_run_does_nothing_when_done(self):
         """予備の回は、その日のレースがすべて取得済みなら JRA にアクセスしない"""
