@@ -30,5 +30,8 @@ self.addEventListener('fetch', e => {
   e.respondWith(fetch(req).then(res => {
     if (res.ok) { const cp = res.clone(); caches.open(PAGES).then(c => c.put(req, cp)); }
     return res;
-  }).catch(() => caches.match(req, {ignoreSearch: true}).then(hit => hit || (req.mode === 'navigate' ? caches.match('index.html') : Response.error()))));
+  }).catch(() => caches.match(req, {ignoreSearch: true}).then(hit => hit || (req.mode === 'navigate'
+    // 保存がない時は、結果カードの中なら保存済みの結果カード、それ以外は出走カードを返す（10/26〜。以前は結果カードでも出走カードを返していた）
+    ? caches.match(/\/result\/?$/.test(url.pathname) || url.pathname.includes('/result/') ? 'result/' : 'index.html')
+    : Response.error()))));
 });

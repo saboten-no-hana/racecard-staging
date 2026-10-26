@@ -251,7 +251,7 @@ function bandsOf(entries,cols){
    横長: 列を左から上→下に埋め、入りきらなければ列を増やす。高さも伸ばして 16:9 に近い形を保つ（最小 1600×900）。日ごとに新しい列から始める
    正方形（1200×1200固定）は10/24に廃止 */
 const ROW_PREF={tall1:.135, tall2:.25, wide:118, wideColW:520};
- /* 縦長1列は幅×0.11、縦長2列は列幅×0.25、横長は行118px（列が減るなら100pxまで）・列幅520px */
+ /* 縦長1列は幅×0.135、縦長2列は列幅×0.25、横長は行118px（列が減るなら100pxまで）・列幅520px */
 function headerTop(W0,H0,S,hs){
   const ts=Math.round(Math.min(W0*.06,H0*.068)), pad=Math.round(W0*.05), ds=Math.round(ts*.46);
   let y=pad+ts*1.08; if(rangeText(hs)||(S.showCount&&runCount(hs))||S.handle) y+=ds*1.5;

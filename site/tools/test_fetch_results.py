@@ -303,6 +303,39 @@ class TestFetchResults(unittest.TestCase):
         with self.assertRaises(ValueError):
             fx.Run(j, c, None, log=self.logs.append).run(until=c.now(), date=DAY)
 
+    def test_read_uses_target_day(self):
+        """日付を指定した仕上げで、結果トップから開催を探し直す時も、指定した日（今日ではなく）で探す（10/26 修正）"""
+        self.write_races([horse('05', 1, '2024000051', '10:05')])
+        c = FakeClock('20:00'); c.t += timedelta(days=1)   # 10/25 の夜に 10/24 の分を取り直す
+        j = FakeJRA(c, {('05', 1): {'time': '10:05', 'horses': ['2024000051'], 'finish': {'2024000051': '4'}}})
+        run = fx.Run(j, c, None, log=self.logs.append)
+        run.day = DAY; run.load(DAY)
+        self.assertEqual(run.read('東京', {}, run.races()), [1])
+
+    def test_auto_until(self):
+        """--auto は起動から5時間半か 18:00 の早い方まで。時間切れの時だけ次の回を起動する"""
+        at = lambda hm: datetime(2026, 10, 24, *map(int, hm.split(':')), tzinfo=JST)   # noqa: E731
+        self.assertEqual(fx.auto_until(at('07:40')), (at('13:10'), True))
+        self.assertEqual(fx.auto_until(at('11:20')), (at('16:50'), True))
+        self.assertEqual(fx.auto_until(at('13:20')), (at('18:00'), False))
+        self.assertEqual(fx.auto_until(at('19:30')), (at('18:00'), False))   # 遅れて 18 時以降に起動した予備の回は、読める分だけ読んで終わる
+
+    def test_auto_backup_run_does_nothing_when_done(self):
+        """予備の回は、その日のレースがすべて取得済みなら JRA にアクセスしない"""
+        self.write_races([horse('05', 1, '2024000001', '10:05')])
+        json.dump({'days': [{'date': DAY, 'venues': ['東京']}], 'horses': [horse('05', 1, '2024000001', '10:05') | {'finish': '1', 'rtime': '1:35.8', 'last3f': '34.0'}]},
+                  open(fx.RESULTS, 'w', encoding='utf-8'), ensure_ascii=False)
+        c = FakeClock('11:20'); j = FakeJRA(c, {})
+        self.assertEqual(self.run_(c, j, until=fx.auto_until(c.now())[0]), {'pending': 0})
+        self.assertEqual(j.count, 0)
+
+    def test_on_main(self):
+        """main 以外のブランチで動いた時は push しない（GITHUB_REF で判定）"""
+        with mock.patch.dict(os.environ, {'GITHUB_REF': 'refs/heads/main'}):
+            self.assertTrue(fx.on_main())
+        with mock.patch.dict(os.environ, {'GITHUB_REF': 'refs/heads/result-card'}):
+            self.assertFalse(fx.on_main())
+
     def test_parse_partial_not_done(self):
         """上位5頭だけの段階の1着（タイムはあるが推定上りが空）は、そろったとみなさない"""
         self.assertFalse(fx.row_done({'finish': '1', 'rtime': '1:35.8', 'last3f': ''}))

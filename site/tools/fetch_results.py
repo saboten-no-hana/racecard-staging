@@ -11,8 +11,9 @@
 - 1開催日のリクエスト数の見込み: 40〜45（結果トップ・開催のページ 最大7＋クラブ馬の出るレース30〜35＋読み直し数回）
 
 使い方:
-  python3 tools/fetch_results.py --until 13:00 [--push] [--pending-flag PATH]   午前の回（終わった時に残りがあれば PATH を作る）
-  python3 tools/fetch_results.py --until 18:00 [--push]                          午後の回
+  python3 tools/fetch_results.py --auto [--push] [--pending-flag PATH]   その日の残りのレースを取る（10/26〜。午前・午後の区別なし）
+      起動から5時間半（ジョブの上限の手前）か 18:00 の早い方まで。時間切れで残りがあれば PATH を作る（次の回を起動する合図）
+  python3 tools/fetch_results.py --until 13:00 [--push]                  終わりの時刻を指定して取る（テスト・手動用）
   python3 tools/fetch_results.py --final [--push]                                仕上げ（まだそろっていないレースの場だけ1回ずつ読む）
   python3 tools/fetch_results.py --final --date 2026-10-25 [--push]              日付を指定して仕上げ（定期実行が来なかった日の取り直し）
 仕上げは、日付を指定しない時は「その日」の分。正午より前に動いた時は前の日の分とみなす（10/25 の 19:07 の定期実行は
@@ -36,6 +37,8 @@ START_AFTER = 18     # 発走から何分後に読み始めるか。10/25 の試
                      # ため、18分後にした（10/25、私が許可。読む回数はほぼ半分、取れるのは平均1分ほど遅れるだけ）
 RETRY = 3            # 読み直しの間隔（分）
 GIVE_UP = 40         # 発走から何分であきらめるか（あとは仕上げ）
+AUTO_SPAN = 330      # --auto の1回の長さ（分）。ジョブの上限（timeout-minutes: 345）の手前で終えて次の回に引き継ぐ
+DAY_END = (18, 0)    # --auto で読むのはこの時刻まで（以後は 19:07 の仕上げ）
 PUSH_PER_HOUR = 8    # Pages の反映の目安（1時間に10回）より少なめ
 CODE = {v: k for k, v in VENUES.items()}
 RACE_FIELDS = ('key', 'horseId', 'name', 'clubId', 'date', 'venue', 'r', 'time', 'raceName', 'grade', 'cls', 'surface', 'dist', 'status')
@@ -131,6 +134,7 @@ class Run:
         self.notes = []
         self.target = None                # (対象の日, クラブ馬の出るレース数, 取得済み)
         self.kai_of = {}                  # 場 → 開催のページ（全レースまとめのリンクがまだなかった時に読み直す）
+        self.day = None                   # 対象の日（YYYY-MM-DD）
 
     # ---- データ
     def load(self, today):
@@ -233,7 +237,7 @@ class Run:
     def read(self, v, ses, races):
         """場 v の全レースまとめを1回読み、クラブ馬の結果を取り込む。新しくそろったレースの一覧を返す"""
         if not ses.get(v):
-            ymd8 = self.clock.now().strftime('%Y%m%d')
+            ymd8 = self.day.replace('-', '')   # 日付を指定した仕上げでも、その日の開催を探す（10/26 修正。以前は今日の日付）
             c = self.kai_of.get(v)
             if not c:   # 結果トップに まだ載っていなかった場 → トップを読み直す
                 self.f.memo = {}
@@ -280,6 +284,7 @@ class Run:
                 raise ValueError('日付の指定は仕上げ（--final）の時だけ')
             today = date
             self.log(f'{date} の分を取る（仕上げ）')
+        self.day = today
         self.load(today)
         races = self.races()
         if not races:
@@ -365,14 +370,38 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv[:-1] else default
 
 
+def auto_until(now):
+    """--auto の終わりの時刻と、それが時間切れ（ジョブの上限）によるものか。18:00 を過ぎてからの起動は読める分だけ読んで終わる"""
+    end = now.replace(hour=DAY_END[0], minute=DAY_END[1], second=0, microsecond=0)
+    cap = now + timedelta(minutes=AUTO_SPAN)
+    return (cap, True) if cap < end else (end, False)
+
+
+def on_main():
+    """main ブランチで動いているか（Actions は GITHUB_REF、手元は今のブランチ名で見る）"""
+    ref = os.environ.get('GITHUB_REF')
+    if ref:
+        return ref == 'refs/heads/main'
+    r = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], capture_output=True, text=True)
+    return r.stdout.strip() == 'main'
+
+
 def main():
     clock = Clock()
-    until = None
-    if arg('--until'):
+    until, capped = None, False
+    if '--auto' in sys.argv:
+        until, capped = auto_until(clock.now())
+        print(f'{until:%H:%M} まで（{"時間切れなら次の回に引き継ぐ" if capped else "あとは仕上げ"}）', flush=True)
+    elif arg('--until'):
         h, m = map(int, arg('--until').split(':'))
         until = clock.now().replace(hour=h, minute=m, second=0, microsecond=0)
+    push = '--push' in sys.argv
+    if push and not on_main():
+        # main 以外のブランチで動かした時に、そのブランチの中身を main に push しないため（10/26〜）
+        print('::warning::main 以外のブランチで動いているので、results.json は push しない', flush=True)
+        push = False
     f = Fetcher(arg('--offline'))
-    run = Run(f, clock, git_publish if '--push' in sys.argv else None)
+    run = Run(f, clock, git_publish if push else None)
     try:
         date = arg('--date')
         if date and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date):
@@ -383,7 +412,7 @@ def main():
         print(f'::error::結果の取得中にエラー: {e!r}', flush=True)
         run.flush('結果を更新', force=True)
         st, code = {'pending': -1}, 1
-    if arg('--pending-flag') and st['pending'] > 0:
+    if arg('--pending-flag') and st['pending'] > 0 and (capped or '--auto' not in sys.argv):
         open(arg('--pending-flag'), 'w').write(str(st['pending']))
     mins = '、'.join(f'{v}{r}R {m}分' for (v, r), m in sorted(run.done_at.items(), key=lambda kv: (CODE.get(kv[0][0], '99'), kv[0][1])))
     tg = getattr(run, 'target', None)
