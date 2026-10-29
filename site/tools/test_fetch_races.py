@@ -99,6 +99,7 @@ class Base(unittest.TestCase):
         self.patches = [mock.patch.object(fr, 'DATA', d), mock.patch.object(fr, 'OUT', os.path.join(d, 'races.json')),
                         mock.patch.object(fr, 'CACHE', os.path.join(d, 'cache.json')), mock.patch.object(fr, 'WAIT', 0),
                         mock.patch.object(fr, 'SEEN', os.path.join(d, 'seen.json')),
+                        mock.patch.object(fr, 'REGIST', os.path.join(d, 'regist.json')),
                         mock.patch.object(fr.time, 'sleep', lambda s: None)]
         for p in self.patches:
             p.start()
@@ -159,6 +160,53 @@ class TestFetch(Base):
         self.assertEqual([h['name'] for h in data['horses']], ['アタラシイウマ', 'キロクズミ'])
         self.assertEqual(sum(1 for c in jra.requests if c.startswith('pw01dud')), 1)
         self.assertFalse(any(c.startswith('pw01dde') for c in jra.requests))   # 馬番なしの時は個別ページを読まない
+
+    def regist(self, rows):
+        with open(fr.REGIST, 'w', encoding='utf-8') as fp:
+            json.dump({'updated': '', 'counts': {'2026-10-22': len(rows)}, 'horses': {'2026-10-22': rows}}, fp, ensure_ascii=False)
+
+    def test_thursday_regist(self):
+        """木曜: 競走馬登録の一覧に馬名と生年が一致する馬は馬のページを読まない。判定は cache.json に記録せず、馬番が出た日に確定する"""
+        horses = [('2024000001', 'シンバクラブ', CARROT, ''), ('2024000002', 'シンバコジン', '山田太郎', ''),
+                  ('2024000003', 'トシチガイ', SILK, ''), ('2024000004', 'イチランニナイ', '鈴木花子', '')]
+        self.regist([['シンバクラブ', '2024-03-01', 'carrot', '父', '母'], ['シンバコジン', '2024-04-01', '', '父', '母'],
+                     ['トシチガイ', '2023-04-01', '', '父', '母']])   # 生年が違う → 別の馬とみなして馬のページを読む
+        jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': horses}])
+        code, data, cache = self.run_main(jra, [], summary=True)
+        self.assertEqual(code, 0)
+        self.assertEqual([h['name'] for h in data['horses']], ['シンバクラブ', 'トシチガイ'])
+        self.assertEqual(sorted(c[9:19] for c in jra.requests if c.startswith('pw01dud')), ['2024000003', '2024000004'])
+        self.assertEqual(cache, {'2024000003': 'silk', '2024000004': ''})   # 一覧で判定した馬は記録しない
+        self.assertIn('登録一覧で判定 2', self.log)
+        self.assertIn('競走馬登録の一覧で判定（馬のページを読まなかった）: 2頭（うちクラブ馬 1頭）', open(os.path.join(self.tmp.name, 'summary.md'), encoding='utf-8').read())
+        # 馬番が出た日: 記録にない馬がいるので個別レースのページを読み、馬主名で確定する
+        jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': horses}])
+        code, data, cache = self.run_main(jra, [])
+        self.assertTrue(any(c.startswith('pw01dde') for c in jra.requests))
+        self.assertEqual(cache['2024000001'], 'carrot')
+        self.assertEqual(cache['2024000002'], '')
+        self.assertFalse(any(c.startswith('pw01dud') for c in jra.requests))
+
+    def test_thursday_regist_wrong(self):
+        """一覧の判定が誤っていても（クラブ馬を「クラブ以外」）、馬番が出た日に個別ページで直る"""
+        horses = [('2024000011', 'マチガイ', CARROT, '')]
+        self.regist([['マチガイ', '2024-03-01', '', '父', '母']])
+        code, data, cache = self.run_main(FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': horses}]), [])
+        self.assertEqual(data['horses'], [])
+        code, data, cache = self.run_main(FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': horses}]), [])
+        self.assertEqual([h['name'] for h in data['horses']], ['マチガイ'])
+        self.assertEqual(cache['2024000011'], 'carrot')
+
+    def test_regist_broken(self):
+        """regist.json が壊れていても止めず、今までどおり馬のページを読む"""
+        with open(fr.REGIST, 'w', encoding='utf-8') as fp:
+            fp.write('{壊れている')
+        jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': [('2024000021', 'ウマ', CARROT, '')]}])
+        code, data, cache = self.run_main(jra, [])
+        self.assertEqual(code, 0)
+        self.assertEqual([h['name'] for h in data['horses']], ['ウマ'])
+        self.assertEqual(cache, {'2024000021': 'carrot'})
+        self.assertIn('regist.json を読めなかった', self.log)
 
     def test_recheck_club_horse_that_left_club(self):
         """クラブ馬と記録済みでも、馬番が出た明日以降のレースでは個別ページで確かめ直す（地方から戻った馬）"""

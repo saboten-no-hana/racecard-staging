@@ -10,6 +10,8 @@ data/cache.json に記録して週をまたいで使い回す（個人馬主の�
 - 1日分をまとめた出馬表ページで、出走馬・枠番・馬番・騎手を読む（競馬場ごとに1ページ）
 - 記録にない馬がいて、馬番つきの出馬表が出ているレースは、そのレースの出馬表（馬主名つき）で確認する
 - それでも分からない馬（主に木曜）は、馬のページで馬主名を確認する
+  ただし競走馬登録の一覧（data/regist.json、tools/fetch_retired.py が作る）に馬名と生年が一致する馬は、馬のページを読まずに
+  その判定で載せる・載せないを決める（cache.json には記録せず、馬番が出た日に個別レースのページで確定する。10/29〜）
 - リクエストの間は2秒以上あける
 
 使い方:
@@ -39,6 +41,7 @@ DATA = os.path.join(ROOT, 'data')
 OUT = os.path.join(DATA, 'races.json')
 CACHE = os.path.join(DATA, 'cache.json')
 SEEN = os.path.join(DATA, 'seen.json')     # クラブ馬が最後に中央の出馬表に載った日（馬ID → YYYY-MM-DD）
+REGIST = os.path.join(DATA, 'regist.json') # 競走馬登録の一覧（tools/fetch_retired.py が作る。馬名・生年月日・クラブID か空文字）
 STALE_DAYS = 90                            # これ以上空いたクラブ馬は、馬番の出る前（木曜）にも馬のページで名義を確かめる
 BASE = 'https://www.jra.go.jp'
 UA = 'Mozilla/5.0 (compatible; racecard/1.0; +https://github.com/saboten-no-hana/racecard)'
@@ -330,6 +333,8 @@ def write_summary(mode, state, code, count, ctx):
               f"- races.json: {'更新' if last['changed'] else '変更なし'}／クラブ馬 {last['total']}頭（馬番あり {last['umaban']}頭）"]
         if last['scratched']:
             L.append(f"- 取消・除外: {'、'.join(last['scratched'])}")
+        if last.get('regist'):
+            L.append(f"- 競走馬登録の一覧で判定（馬のページを読まなかった）: {last['regist']}頭（うちクラブ馬 {last['regist_club']}頭）／馬のページ: {last['horse_pages']}回")
         L += ['', '| クラブ | 頭数 |', '|---|---:|']
         L += [f"| {names.get(k, k)} | {v} |" for k, v in sorted(last['hits'].items(), key=lambda kv: -kv[1])]
         L += ['', f"一致しなかったクラブらしい名義: {'、'.join(last['miss']) or 'なし'}"]
@@ -390,6 +395,24 @@ def umaban_complete(races):
     """取消・除外を除く全出走馬に馬番が入っているか"""
     hs = [h for r in races for h in r['horses'] if not h['status']]
     return bool(hs) and all(h['umaban'] for h in hs)
+
+def load_regist():
+    """競走馬登録の一覧（regist.json）から {馬名: {(生年4桁, クラブID か '')}}。
+    ファイルがない・壊れている時は空にする（今までどおり馬のページを読む）"""
+    try:
+        with open(REGIST, encoding='utf-8') as fp:
+            d = json.load(fp)
+        out = {}
+        for rows in d['horses'].values():
+            for r in rows:
+                if isinstance(r, list) and len(r) >= 3 and isinstance(r[0], str) and isinstance(r[1], str) and isinstance(r[2], str):
+                    out.setdefault(r[0], set()).add((r[1][:4], r[2]))
+        return out
+    except FileNotFoundError:
+        return {}
+    except Exception as e:   # 壊れていても出馬表の取得は止めない
+        print(f'regist.json を読めなかったので使わない: {e}', flush=True)
+        return {}
 
 def save_records(cache, seen, club_of):
     """名義の記録（cache.json: 馬ID → クラブID か空文字）と、クラブ馬が最後に載った日（seen.json）を書く"""
@@ -462,8 +485,13 @@ def attempt(f, clubs, mode, ctx):
         seen_owners[h['horseId']] = owner
         club_of[h['horseId']] = clubs.get(norm_owner(owner), '')
 
+    # 馬番が出る前（木曜）に記録にない馬は、競走馬登録の一覧（regist.json）に馬名と生年（馬IDの先頭4桁）が一致すれば、
+    # 馬のページを読まずにその判定で載せる・載せないを決める（10/29〜）。判定は cache.json には記録しない
+    # （馬番が出た日に、記録にない馬として個別レースのページを読み、馬主名で確定する。万一判定を誤っても木曜〜翌朝の1回分で直る）
+    regist = load_regist()
+    guess = {}   # 馬ID → クラブID か ''（この回だけ。保存しない）
     result = []
-    stats = {'detail': 0, 'horse': 0, 'stale': 0}
+    stats = {'detail': 0, 'horse': 0, 'stale': 0, 'regist': 0}
     seen = json.load(open(SEEN, encoding='utf-8')) if os.path.exists(SEEN) else {}
     complete = True
     try:
@@ -493,6 +521,12 @@ def attempt(f, clubs, mode, ctx):
                 for h in unknown:
                     if not h['horseCname']:
                         continue
+                    if regist and not any(x['umaban'] for x in race['horses']):
+                        hit = {c for y, c in regist.get(h['name'], ()) if y == h['horseId'][:4]}
+                        if len(hit) == 1:
+                            guess[h['horseId']] = hit.pop()
+                            stats['regist'] += 1
+                            continue
                     owner = horse_owner(f.get(h['horseCname'], path='/JRADB/accessU.html'))
                     stats['horse'] += 1
                     if owner is not None:
@@ -513,7 +547,7 @@ def attempt(f, clubs, mode, ctx):
                                 print(f"    名義が変わった: {h['name']}（{was} → {club_of[h['horseId']] or 'クラブ以外'}）", flush=True)
                                 ctx.setdefault('changed', []).append(f"{h['name']}（{was} → {club_of[h['horseId']] or 'クラブ以外'}）")
                 for h in race['horses']:
-                    club = club_of.get(h['horseId'], '')
+                    club = club_of.get(h['horseId']) if h['horseId'] in club_of else guess.get(h['horseId'], '')
                     if not club:
                         continue
                     if seen.get(h['horseId'], '') < rdate:
@@ -526,7 +560,7 @@ def attempt(f, clubs, mode, ctx):
                         'surface': race.get('surface', ''), 'dist': race.get('dist', ''),
                         'jockey': h['jockey'], 'waku': h['waku'], 'umaban': h['umaban'], 'sexAge': h['sexAge'], 'weight': h['weight'], 'status': h['status'],
                     })
-            print(f"  {mt['date']} {mt['venue']}: {len(races)}R / 累計 {len(result)} 頭 / 詳細 {stats['detail']} / 馬ページ {stats['horse']} / 久々の確認 {stats['stale']}", flush=True)
+            print(f"  {mt['date']} {mt['venue']}: {len(races)}R / 累計 {len(result)} 頭 / 詳細 {stats['detail']} / 馬ページ {stats['horse']} / 久々の確認 {stats['stale']} / 登録一覧で判定 {stats['regist']}", flush=True)
             if mt in check:
                 ok = confirm_complete(mt['cname'], race_pages, races, ctx['prev']) if mode == 'confirm' else umaban_complete(races)
                 if not ok:
@@ -565,7 +599,9 @@ def attempt(f, clubs, mode, ctx):
         changed = True
     ctx['last'] = {'meetings': [f"{x['date']} {x['venue']}" for x in meetings], 'total': len(result), 'hits': hits,
                    'miss': miss, 'changed': changed, 'umaban': sum(1 for x in result if x['umaban']),
-                   'scratched': [f"{x['name']}（{x['status']}）" for x in result if x['status']]}
+                   'scratched': [f"{x['name']}（{x['status']}）" for x in result if x['status']],
+                   'regist': stats['regist'], 'regist_club': sum(1 for x in result if x['horseId'] not in club_of and x['horseId'] in guess),
+                   'horse_pages': stats['horse']}
     save_records(cache, seen, club_of)
     ctx['ok'] = True
     if not complete:

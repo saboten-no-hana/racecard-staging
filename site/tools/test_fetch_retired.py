@@ -3,7 +3,7 @@
 実行: python3 -m unittest discover -s tools -p 'test_*.py'
 data/ は一時ディレクトリに差し替えるので、本物の retired.json は書き換えない。
 """
-import io, json, os, sys, tempfile, unittest
+import io, json, os, sys, tempfile, unittest, warnings
 from contextlib import redirect_stdout
 from unittest import mock
 
@@ -11,12 +11,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fetch_races as fr
 import fetch_retired as rt
 
+warnings.simplefilter('ignore', ResourceWarning)   # fetch_races.py の load_clubs の open(...).read() は CPython ではすぐ閉じられる
+
 
 class FakeV:
     """入口（pv156liH1/98）→ 抹消日のページ（pv16mdj10YYYYMMDD/XX）。days: {YYYY-MM-DD: [(馬名, 父, 母)]}"""
 
-    def __init__(self, days):
+    def __init__(self, days, regs=None):
         self.days = days
+        self.regs = regs if regs is not None else {'2026-10-22': [('アイビーチャッカリ', '2024-03-21', '石坂茂ラボ(株)', '父', '母')]}
         self.requests = []
         self.entry = 'pv156liH1/98'   # 入口の値（変わった時の試験用）
         self.counts = {}               # リンクに書く頭数を上書き（表と食い違う時の試験用）
@@ -29,7 +32,8 @@ class FakeV:
         links = ''.join(f"""<li><a href="#" onclick="doAction('/JRADB/accessV.html','{self.cname(d)}');return false">"""
                         f"""{int(d[:4])}年{int(d[5:7])}月{int(d[8:])}日抹消（{self.counts.get(d, len(v))}頭）</a></li>"""
                         for d, v in sorted(self.days.items(), reverse=True))
-        reg = """<a href="#" onclick="doAction('/JRADB/accessV.html','pv15udj1020261022/9F');return false">2026年10月22日登録（80頭）</a>"""
+        reg = ''.join(f"""<li><a href="#" onclick="doAction('/JRADB/accessV.html','{self.rcname(d)}');return false">"""
+                      f"""{int(d[:4])}年{int(d[5:7])}月{int(d[8:])}日登録（{len(v)}頭）</a></li>""" for d, v in sorted(self.regs.items(), reverse=True))
         return f'<html><body><div id="contentsBody">{reg}<ul>{links}</ul></div></body></html>'
 
     def day_html(self, d):
@@ -38,6 +42,18 @@ class FakeV:
                        f'<td class="prize"></td></tr>' for n, s, m in self.days[d])
         return (f'<html><body><div id="contentsBody"><table class="basic narrow-xy striped mt15"><caption>抹消一覧 {d}抹消分</caption>'
                 f'<thead><tr><th>抹消馬名</th><th>調教師名</th><th>最近のレース</th><th>父 母</th><th>収得賞金</th><th>入着賞金</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table></div></body></html>')
+
+    @staticmethod
+    def rcname(d):
+        return f'pv15udj10{d.replace("-", "")}/{d[-2:]}'
+
+    def reg_html(self, d):
+        rows = ''.join(f'<tr><th scope="row">{n}</th><td class="data">牝・鹿毛<br/>{int(b[:4])}年{int(b[5:7])}月{int(b[8:])}日</td>'
+                       f'<td class="stable">（美浦）調教師<br/>浦河町 牧場<br/>{o}</td><td><div class="parent"><span>{s}</span><span>{m}</span></div></td>'
+                       f'<td><div class="grandparent"><span>母の父</span><span>母の母</span></div></td></tr>' for n, b, o, s, m in self.regs[d])
+        return (f'<html><body><div id="contentsBody"><table class="basic narrow-xy striped mt15"><caption>競走馬登録 {d}登録分</caption>'
+                f'<thead><tr><th>馬名</th><th>性別・毛色 生年月日</th><th>預託きゅう舎 産地・生産牧場 馬主名</th><th>父 母</th><th>母の父 母の母</th></tr></thead>'
                 f'<tbody>{rows}</tbody></table></div></body></html>')
 
     def menu_html(self):
@@ -53,6 +69,9 @@ class FakeV:
         for d in self.days:
             if cname == self.cname(d):
                 return self.day_html(d)
+        for d in self.regs:
+            if cname == self.rcname(d):
+                return self.reg_html(d)
         return '<html><title>パラメータエラー</title></html>'
 
 
@@ -60,7 +79,8 @@ class TestFetchRetired(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = os.path.join(self.tmp.name, 'retired.json')
-        self.patches = [mock.patch.object(rt, 'OUT', self.out), mock.patch.object(fr, 'WAIT', 0),
+        self.reg = os.path.join(self.tmp.name, 'regist.json')
+        self.patches = [mock.patch.object(rt, 'OUT', self.out), mock.patch.object(rt, 'REG_OUT', self.reg), mock.patch.object(fr, 'WAIT', 0),
                         mock.patch.object(fr.time, 'sleep', lambda s: None)]
         for p in self.patches:
             p.start()
@@ -79,8 +99,8 @@ class TestFetchRetired(unittest.TestCase):
             code = rt.main()
         return code, out.getvalue()
 
-    def data(self):
-        with open(self.out, encoding='utf-8') as fp:
+    def data(self, path=None):
+        with open(path or self.out, encoding='utf-8') as fp:
             return json.load(fp)
 
     def test_first_and_incremental(self):
@@ -92,7 +112,7 @@ class TestFetchRetired(unittest.TestCase):
         self.assertEqual(d['counts'], {'2026-10-25': 1, '2026-10-22': 2})
         self.assertEqual(d['horses']['2026-10-22'][0], ['アグラード', 'ニューイヤーズデイ', 'ヴィータアレグリア'])
         self.assertEqual(list(d['horses']), ['2026-10-25', '2026-10-22'])   # 新しい日が先
-        self.assertEqual(len(jra.requests), 3)                              # 入口＋2日分
+        self.assertEqual(len(jra.requests), 4)                              # 入口＋抹消日2日分＋登録日1日分
         # 2回目: 同じ頭数の日は読まない（入口だけ）。更新時刻も書き換えない
         upd = d['updated']
         jra.requests.clear()
@@ -130,7 +150,7 @@ class TestFetchRetired(unittest.TestCase):
         self.assertIn('2026-10-22', self.data()['horses'])
 
     def test_format_error(self):
-        jra = FakeV({})
+        jra = FakeV({}, regs={})
         code, out = self.run_main(jra)
         self.assertEqual(code, 1)
         self.assertIn('形式が読めない', out)
@@ -146,6 +166,52 @@ class TestFetchRetired(unittest.TestCase):
         jra.requests.clear()
         self.run_main(jra)
         self.assertEqual(jra.requests, ['pv156liH1/98'])
+
+    def test_regist(self):
+        """登録一覧: 馬主名はクラブIDに置き換えて保存（名前そのものは残さない）。新しい登録日だけ読む"""
+        jra = FakeV({'2026-10-22': [('アグラード', '父', '母')]},
+                    regs={'2026-10-22': [('アキュティアマ', '2024-03-19', '(有)キャロットファーム', 'コントレイル', 'アスコルティ'),
+                                         ('アイビーチャッカリ', '2024-03-21', '石坂茂ラボ(株)', 'マインドユアビスケッツ', 'アイアムピッカピカ'),
+                                         ('シルクノウマ', '2024-04-01', 'シルクレーシング', '父', '母')]})
+        code, out = self.run_main(jra)
+        self.assertEqual(code, 0)
+        g = self.data(self.reg)
+        self.assertEqual(g['horses']['2026-10-22'], [['アキュティアマ', '2024-03-19', 'carrot', 'コントレイル', 'アスコルティ'],
+                                                      ['アイビーチャッカリ', '2024-03-21', '', 'マインドユアビスケッツ', 'アイアムピッカピカ'],
+                                                      ['シルクノウマ', '2024-04-01', 'silk', '父', '母']])
+        with open(self.reg, encoding='utf-8') as fp:
+            raw = fp.read()
+        self.assertNotIn('石坂', raw)
+        self.assertNotIn('キャロットファーム', raw)
+        self.assertIn('クラブ馬 2頭', out)
+        jra.regs['2026-10-29'] = [('アタラシイウマ', '2024-05-01', '個人 馬主', '父', '母')]
+        jra.requests.clear()
+        self.run_main(jra)
+        self.assertEqual(sorted(jra.requests), sorted(['pv156liH1/98', jra.rcname('2026-10-29')]))
+
+    def test_reregistered(self):
+        """抹消のあとに同じ馬名・父・母で登録された馬は、抹消一覧から外す（地方から戻ってきた再登録）。同名でも父母が違えば外さない"""
+        jra = FakeV({'2026-09-25': [('モドッテキタ', 'ドゥラメンテ', 'ハハ'), ('ベツノウマ', 'キズナ', 'ハハ2'), ('ソノママ', '父', '母')]},
+                    regs={'2026-10-22': [('モドッテキタ', '2023-04-01', '(有)キャロットファーム', 'ドゥラメンテ', 'ハハ'),
+                                         ('ベツノウマ', '2024-04-01', '個人', 'エピファネイア', 'ハハ3')],
+                          '2026-09-24': [('ソノママ', '2023-03-01', '個人', '父', '母')]})   # 抹消より前の登録は関係ない
+        code, out = self.run_main(jra)
+        self.assertEqual(code, 0)
+        self.assertEqual([h[0] for h in self.data()['horses']['2026-09-25']], ['ベツノウマ', 'ソノママ'])
+        self.assertIn('再登録のため抹消一覧から外した: モドッテキタ（2026-09-25 抹消 → 2026-10-22 登録）', out)
+        # 次の回も抹消日を読み直さず、外したまま
+        jra.requests.clear()
+        self.run_main(jra)
+        self.assertEqual(jra.requests, ['pv156liH1/98'])
+        self.assertNotIn('モドッテキタ', [h[0] for h in self.data()['horses']['2026-09-25']])
+
+    def test_no_regist_links(self):
+        """入口に登録日のリンクがなくても、抹消一覧は更新する（ログに残す）"""
+        jra = FakeV({'2026-10-22': [('アグラード', '父', '母')]}, regs={})
+        code, out = self.run_main(jra)
+        self.assertEqual(code, 0)
+        self.assertIn('登録日のリンクがない', out)
+        self.assertIn('2026-10-22', self.data()['horses'])
 
     def test_comm_error(self):
         jra = FakeV({'2026-10-22': [('アグラード', '父', '母')]})
