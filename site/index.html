@@ -886,6 +886,9 @@ async function loadRetired(){
 }
 const rkey=r=>r.name+'|'+r.date;
 function renderRetired(RM){
+  /* 「このまま残す」の記録は、今も★が付いている馬の分だけ残す（★を外してから付け直したら、もう一度知らせる。10/29〜） */
+  if(RETIRED&&state.retiredSeen.length){ const names=new Set([...state.myHorses.map(id=>state.myNames[id]).filter(Boolean),...state.myPending]);
+    const keep=state.retiredSeen.filter(k=>names.has(k.split('|')[0])); if(keep.length!==state.retiredSeen.length){ state.retiredSeen=keep; save(); } }
   const el=$('#p-retired'), xs=RM.filter(r=>!state.retiredSeen.includes(rkey(r)));
   if(!xs.length){ el.innerHTML=''; return; }
   el.innerHTML=`<div class="banner retired"><p>★を付けた馬のうち <b>${xs.length}頭</b> が登録抹消になっています。</p>
