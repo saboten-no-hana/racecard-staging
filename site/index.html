@@ -694,7 +694,7 @@ $('#post').addEventListener('click',async()=>{ const st=$('#status'); st.textCon
 });
 
 /* ---------- 今週の出走馬（data/races.json） ---------- */
-let RACES=null, HELD=null;
+let RACES=null, HELD=null, STATUS=null; /* STATUS: data/status.json（出馬表の集計中の表示用、10/29〜） */
 const isMine=id=>state.myHorses.includes(id);
 /* レース名の後ろに格を付ける（10/18〜）: 重賞（GII）・リステッド（L）・オープン特別（OP）・条件特別（2勝クラス）。
    一般戦（3歳以上1勝クラス・2歳未勝利・メイクデビュー〇〇）はレース名に格が入っているので付けない */
@@ -768,8 +768,13 @@ function raceState(){
   const N=jstNow(), yearEnd=(N.m===12&&N.d>=24)||(N.m===1&&N.d<=7);
   const days=(RACES.days||[]).map(d=>d.date).filter(d=>d>=N.ymd).sort();
   if(!days.length){
-    if(yearEnd) return {wait:true,html:'年末年始は開催日・発表時刻が不規則です。出馬表が発表されると5分ほどで載ります。'};
-    if(N.wd===4&&N.min>=15*60+40&&N.min<19*60+30) return {wait:true,reload:true,html:'<b>出走確定の発表待ち</b>です。木曜16時すぎの発表を5分おきに確認していて、発表から5〜10分ほどで載ります。'};
+    /* 出走確定を見つけて集計している間（10/29〜）。見込み時刻を40分過ぎたら（取得が止まった時など）元の表示に戻す */
+    const st=STATUS, eta=st&&Date.parse(st.eta);
+    if(st&&st.state==='collecting'&&(st.dates||[]).some(d=>d>N.ymd)&&eta&&Date.now()<eta+40*60e3&&Date.now()>Date.parse(st.since)-10*60e3){
+      const t=new Date(eta+9*3600e3), left=eta-Date.now();
+      return {wait:true,reload:true,html:'<b>出走確定が発表されました。</b>出資馬を集計中で、'+(left>60e3?`<b>${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}ごろ</b>に載る見込みです。`:'まもなく載ります。')}; }
+    if(yearEnd) return {wait:true,html:'年末年始は開催日・発表時刻が不規則です。出馬表が発表されると30分ほどで載ります（集計中は載る見込みの時刻をここに出します）。'};
+    if(N.wd===4&&N.min>=15*60+40&&N.min<19*60+30) return {wait:true,reload:true,html:'<b>出走確定の発表待ち</b>です。木曜16時すぎの発表を5分おきに確認していて、発表後30分ほどで載ります（集計中は載る見込みの時刻をここに出します）。'};
     const when=N.wd===4&&N.min<16*60?'今日（木曜）16時すぎ':'木曜16時すぎ';
     return {wait:true,html:`次の週の出走馬は <b>${when}</b> に載ります（馬番は各レースの前日10時すぎ）。`};
   }
@@ -795,6 +800,7 @@ async function loadRaces(){
   const U=$('#p-upd');
   try{
     const r=await fetch('data/races.json',{cache:'no-cache'}); if(!r.ok) throw new Error(r.status);
+    try{ const s=await fetch('data/status.json',{cache:'no-cache'}); STATUS=s.ok?await s.json():null; }catch(e){ STATUS=null; } /* 読めなくても出馬表は表示する */
     RACES=await r.json(); HELD={}; RACES.days.forEach(d=>HELD[d.date]=d.venues);
     U.textContent=`出馬表 ${jstTime(RACES.updated)} 更新・${RACES.horses.length}頭`;
     const counts={}; RACES.horses.forEach(x=>counts[x.clubId]=(counts[x.clubId]||0)+1);

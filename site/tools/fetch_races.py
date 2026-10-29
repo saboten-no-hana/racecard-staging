@@ -42,6 +42,7 @@ OUT = os.path.join(DATA, 'races.json')
 CACHE = os.path.join(DATA, 'cache.json')
 SEEN = os.path.join(DATA, 'seen.json')     # クラブ馬が最後に中央の出馬表に載った日（馬ID → YYYY-MM-DD）
 REGIST = os.path.join(DATA, 'regist.json') # 競走馬登録の一覧（tools/fetch_retired.py が作る。馬名・生年月日・クラブID か空文字）
+STATUS = os.path.join(DATA, 'status.json') # 出馬表の集計の状態（画面の「集計中」の表示用。10/29〜）
 STALE_DAYS = 90                            # これ以上空いたクラブ馬は、馬番の出る前（木曜）にも馬のページで名義を確かめる
 BASE = 'https://www.jra.go.jp'
 UA = 'Mozilla/5.0 (compatible; racecard/1.0; +https://github.com/saboten-no-hana/racecard)'
@@ -418,6 +419,53 @@ def load_regist():
         print(f'regist.json を読めなかったので使わない: {e}', flush=True)
         return {}
 
+def write_status(st, push=False):
+    """data/status.json を書く。push=True で、GitHub Actions の main の上（環境変数 RACECARD_PUSH_STATUS=1）なら、
+    すぐにコミットして push する（取得の終わりを待たずに画面に「集計中」を出すため）。失敗しても出馬表の取得は止めない"""
+    try:
+        with open(STATUS, 'w', encoding='utf-8') as fp:
+            json.dump(st, fp, ensure_ascii=False)
+    except OSError as e:
+        print(f'status.json を書けなかった: {e}', flush=True)
+        return False
+    if not push or os.environ.get('RACECARD_PUSH_STATUS') != '1':
+        return False
+    import subprocess
+    def git(*a):
+        return subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True, timeout=120).returncode
+    try:
+        git('add', 'data/status.json')
+        if git('commit', '-q', '-m', f"出馬表の集計を開始 {datetime.now(JST):%m/%d %H:%M}") != 0:
+            return False
+        for i in range(3):   # 結果の取得の push と重なることがあるので、取り込み直して3回まで
+            if git('pull', '--rebase', '--autostash', '-q', 'origin', 'main') == 0 and git('push', '-q') == 0:
+                print('集計中の表示（status.json）を push した', flush=True)
+                return True
+            git('rebase', '--abort')
+            time.sleep(5 * (i + 1))
+    except Exception as e:
+        print(f'集計中の表示の push でエラー: {e!r}', flush=True)
+    print('::warning::集計中の表示（status.json）を push できなかった（取得は続ける）', flush=True)
+    return False
+
+def estimate_pages(f, meetings, club_of, regist, seen, today):
+    """これから読む個別レース・馬のページのおよその数（集計中の表示の見込み時刻用）。
+    開催のページは read_meeting で読む（同じ試行の中では読み直さないので、このあとの取得でリクエストは増えない）"""
+    n = 0
+    for mt in meetings:
+        race_pages, races = read_meeting(f, mt)
+        for race in races:
+            hs = race['horses']
+            unknown = [h for h in hs if h['horseId'] not in club_of]
+            rdate = race.get('date', mt['date'])
+            if any(h['umaban'] for h in hs):
+                n += 1 if (unknown or (rdate > today and any(club_of.get(h['horseId']) for h in hs))) and race['r'] in race_pages else 0
+                continue
+            n += sum(1 for h in unknown if h['horseCname'] and len({c for y, c in regist.get(h['name'], ()) if y == h['horseId'][:4]}) != 1)
+            if rdate > today:
+                n += sum(1 for h in hs if club_of.get(h['horseId']) and seen.get(h['horseId']) and days_between(seen[h['horseId']], rdate) >= STALE_DAYS)
+    return n
+
 def save_records(cache, seen, club_of):
     """名義の記録（cache.json: 馬ID → クラブID か空文字）と、クラブ馬が最後に載った日（seen.json）を書く"""
     json.dump(cache, open(CACHE, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'), sort_keys=True)
@@ -498,6 +546,19 @@ def attempt(f, clubs, mode, ctx):
     stats = {'detail': 0, 'horse': 0, 'stale': 0, 'regist': 0}
     seen = json.load(open(SEEN, encoding='utf-8')) if os.path.exists(SEEN) else {}
     complete = True
+    # 新しい開催日の出走確定を見つけたら、読むページの数から終わる時刻を見積もり、画面に「集計中」を出す（10/29〜。1回の実行で1回だけ）
+    if mode == 'confirm' and new_dates and not ctx.get('status'):
+        try:
+            pages = estimate_pages(f, meetings, club_of, regist, seen, today)
+            now = datetime.now(JST)
+            eta = now + timedelta(seconds=pages * (WAIT + 0.6) + 120)   # 1ページ約2.6秒＋公開ページへの反映
+            ctx['status'] = {'state': 'collecting', 'dates': new_dates, 'since': now.isoformat(timespec='seconds'),
+                             'eta': eta.isoformat(timespec='seconds'), 'pages': pages}
+            print(f'集計を開始: 読むページ 約{pages}／見込み {eta:%H:%M}', flush=True)
+            write_status(ctx['status'], push=True)
+        except Exception as e:   # 見積もり・表示で失敗しても取得は続ける
+            print(f'::warning::集計中の表示でエラー: {e!r}', flush=True)
+            ctx['status'] = {'state': 'error'}
     try:
         for mt in meetings:
             race_pages, races = read_meeting(f, mt)
@@ -607,6 +668,11 @@ def attempt(f, clubs, mode, ctx):
                    'regist': stats['regist'], 'regist_club': sum(1 for x in result if x['horseId'] not in club_of and x['horseId'] in guess),
                    'horse_pages': stats['horse']}
     save_records(cache, seen, club_of)
+    if ctx.get('status', {}).get('state') == 'collecting' and complete:
+        # 集計が終わった（最後のコミットで races.json と一緒に公開される）
+        write_status({'state': 'done', 'dates': ctx['status']['dates'], 'since': ctx['status']['since'],
+                      'updated': datetime.now(JST).isoformat(timespec='seconds')})
+        ctx['status']['state'] = 'done'
     ctx['ok'] = True
     if not complete:
         print('まだ揃っていない開催がある（JRAのサイトへの反映途中）')

@@ -100,6 +100,7 @@ class Base(unittest.TestCase):
                         mock.patch.object(fr, 'CACHE', os.path.join(d, 'cache.json')), mock.patch.object(fr, 'WAIT', 0),
                         mock.patch.object(fr, 'SEEN', os.path.join(d, 'seen.json')),
                         mock.patch.object(fr, 'REGIST', os.path.join(d, 'regist.json')),
+                        mock.patch.object(fr, 'STATUS', os.path.join(d, 'status.json')),
                         mock.patch.object(fr.time, 'sleep', lambda s: None)]
         for p in self.patches:
             p.start()
@@ -312,6 +313,33 @@ class TestModes(Base):
                                       races={'days': [{'date': day(-5), 'venues': ['東京']}], 'horses': []})
         self.assertEqual(code, 0)
         self.assertEqual(len(data['horses']), 12)
+
+    def test_confirm_status(self):
+        """confirm: 新しい開催日の出走確定を見つけたら、読むページの数から見込み時刻を出して「集計中」を書き（push を頼む）、
+        取得が終わったら done にする。テストでは RACECARD_PUSH_STATUS がないので push はしない"""
+        horses = lambda r: [(f'20210002{r:02d}', f'シンキ{r}', CARROT if r % 2 else '山田太郎', ''), (f'20210003{r:02d}', f'キロク{r}', CARROT, '')]
+        jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': r, 'umaban': False, 'horses': horses(r)} for r in range(1, 13)])
+        calls = []
+        real = fr.write_status
+        with mock.patch.object(fr, 'write_status', lambda st, push=False: (calls.append((dict(st), push)), real(st, push))[1]):
+            code, data, _ = self.run_main(jra, ['--mode', 'confirm', '--start', '00:00', '--until', '23:59', '--interval', '0'],
+                                          cache={f'20210003{r:02d}': 'carrot' for r in range(1, 13)},
+                                          races={'days': [{'date': day(-5), 'venues': ['東京']}], 'horses': []})
+        self.assertEqual(code, 0)
+        self.assertEqual(len(data['horses']), 18)
+        first, push = calls[0]
+        self.assertTrue(push)
+        self.assertEqual((first['state'], first['dates'], first['pages']), ('collecting', [day(2)], 12))   # 記録にない12頭の馬のページ
+        self.assertGreater(first['eta'], first['since'])
+        self.assertEqual(calls[-1][0]['state'], 'done')
+        self.assertEqual(json.load(open(fr.STATUS, encoding='utf-8'))['state'], 'done')
+        self.assertEqual(sum(1 for c in jra.requests if c.startswith('pw01des')), 1)   # 見積もりで開催のページを読み直していない
+
+    def test_status_not_for_umaban(self):
+        """umaban（翌日の馬番）や1回だけの取得では「集計中」を出さない"""
+        jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': [('2021000401', 'ウマ', CARROT, '')]}])
+        self.run_main(jra, [])
+        self.assertFalse(os.path.exists(fr.STATUS))
 
     def at_today(self, hhmm):
         h, m = map(int, hhmm.split(':'))
