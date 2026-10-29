@@ -140,6 +140,19 @@ class TestFetch(Base):
         rows = fr.parse_rows(BeautifulSoup(html, 'html.parser').select_one('table'))
         self.assertEqual([h['jockey'] for h in rows], ['▲ 遠藤 汰月', '菅原 明良'])
 
+    def test_jockey_without_link(self):
+        """短期免許が出たばかりの外国人騎手は、騎手のページへのリンクがなく文字だけ（10/29 の東京の全レースまとめで確認）"""
+        html = ('<table><tbody>'
+                '<tr><td class="horse"><a href="/JRADB/accessU.html?CNAME=pw01dud002023100003/AA">ウマ3</a></td>'
+                '<td class="jockey">A.プーシャン</td></tr>'
+                '<tr><td class="horse"><a href="/JRADB/accessU.html?CNAME=pw01dud002023100004/AA">ウマ4</a></td>'
+                '<td class="jockey"><span class="mark jockey" title="3kg減量">▲</span>リンク ナシ</td></tr>'
+                '<tr><td class="horse"><a href="/JRADB/accessU.html?CNAME=pw01dud002023100005/AA">ウマ5</a></td><td class="jockey"></td></tr>'
+                '</tbody></table>')
+        from bs4 import BeautifulSoup
+        rows = fr.parse_rows(BeautifulSoup(html, 'html.parser').select_one('table'))
+        self.assertEqual([h['jockey'] for h in rows], ['A.プーシャン', '▲ リンク ナシ', ''])
+
     def test_club_horses_only_and_fields(self):
         """クラブ名義の馬だけを出力し、性齢・斤量・馬番も入る。個人馬主の名前は保存しない"""
         jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': 11, 'umaban': True,

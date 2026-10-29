@@ -1,1 +1,1 @@
-d65eb4f README: 開発メモの fetch_retired.py の説明に競走馬登録を足す
+16dc1ea README: 開発メモの fetch_retired.py の説明に競走馬登録を足す
