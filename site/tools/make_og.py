@@ -1,6 +1,6 @@
 """OGP 画像（og.png、1200×630）を作り直す
 
-左に説明文、右に「縦長」の出走カード、その左奥に作成ページ（スマホ幅の「今週の出走馬から選ぶ」）を重ねた
+左に説明文、右に「縦長」の出走カード、その左奥に作成ページ（スマホ幅のタブと「今週の出走馬から選ぶ」）を重ねた
 1200×630 の画像を作る。カードとページは画面と同じ描画処理で、架空の馬名を使う
 （X のカードは横長 1.91:1 で表示されるため、縦長のカードを丸ごと見せる形にしている）。
 
@@ -96,12 +96,12 @@ COMPOSE = r"""
   const fit = (t, w, size, mw = maxW) => { let s = size; do { c.font = `${w} ${s}px ${IPA}`; } while (c.measureText(t).width > mw && --s > 10); return s; };
   c.textBaseline = 'alphabetic';
   let y = 100;
-  c.fillStyle = '#e2bd5c'; fit('一口馬主の出走告知を、1枚の画像に', 700, 22); c.fillText('一口馬主の出走告知を、1枚の画像に', x, y);
+  c.fillStyle = '#e2bd5c'; fit('出資馬の出走告知画像をカンタン生成', 700, 22); c.fillText('出資馬の出走告知画像をカンタン生成', x, y);
   y += 26; c.fillStyle = '#f4efe1';
   const s1 = fit('カードメーカー', 700, 70); c.font = `700 ${s1}px ${IPA}`; c.fillText('出資馬出走', x, y + s1);
   y += s1 * 1.18; c.fillText('カードメーカー', x, y + s1);
   y += s1 + 28; c.fillStyle = '#e2bd5c'; c.fillRect(x, y, 70, 4); c.fillStyle = 'rgba(255,255,255,0.10)'; c.fillRect(x + 80, y + 1, maxW - 80, 2);
-  const lines = ['一口クラブ馬を自動でリストアップ', 'レース名・騎手名・馬番（決定後）なども自動表示', '背景などのカスタムも可能', '複数クラブ対応・無料・登録不要'];
+  const lines = ['一口クラブ馬を自動でリストアップ', 'レース名・騎手名・馬番（決定後）なども自動表示', '背景などのカスタムも可能', 'レース終了後には出走結果のカードも生成可能', '複数クラブ対応・無料・登録不要'];
   const ls = Math.min(...lines.map(t => fit(t, 700, 25, maxW - 22)));  /* 箇条書きは同じ大きさにそろえる */
   y += Math.round(((H - 56 - 22 - y) - ls * 1.75 * (lines.length - 1)) / 2 + ls * .4);  /* 区切り線と URL の間の中央に */
   for (const t of lines) { c.fillStyle = '#e2bd5c'; c.beginPath(); c.arc(x + 6, y - ls*.36, 4.5, 0, Math.PI*2); c.fill();
@@ -141,7 +141,10 @@ def main():
             mob = open_page({'width': 390, 'height': 900}, 2)
             mob.add_style_tag(content='#picker details,#picker>.hint,#picker .checks{display:none!important}')
             mob.wait_for_timeout(200)
-            shot = mob.locator('#picker').screenshot()
+            # ページ上部のタブ（出走カード｜結果カード）から「今週の出走馬から選ぶ」の下端までを切り出す（左右と上に少し余白）
+            box = mob.evaluate("""() => { const t = document.querySelector('nav.tabs').getBoundingClientRect(), p = document.getElementById('picker').getBoundingClientRect();
+              return {x: p.left - 8, y: t.top + scrollY - 12, width: p.width + 16, height: p.bottom - t.top + 12}; }""")
+            shot = mob.screenshot(clip=box, full_page=True)
             pg = open_page({'width': 1280, 'height': 900}, 1)
             data = pg.evaluate(COMPOSE, 'data:image/png;base64,' + base64.b64encode(shot).decode())
             b.close()

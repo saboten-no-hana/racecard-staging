@@ -1,6 +1,6 @@
 name: テスト環境に反映
 # site/（本番 racecard のコミットを写したもの）を、本番と混ざらないように書き換えて GitHub Pages に出す。
-# 出馬表（races.json）・結果（results.json）は本番リポジトリから取る（結果がまだなければ stage/sample の見本）。JRA にはアクセスしない。
+# 出馬表（races.json）・結果（results.json）・登録抹消（retired.json）は本番リポジトリから取る（結果・登録抹消がまだなければ stage/sample の見本）。JRA にはアクセスしない。
 # 定期実行は races.json を本番の最新にそろえるため（11:20・18:20 JST）。
 on:
   push:
@@ -35,8 +35,11 @@ jobs:
           curl -fsSL --retry 2 -o "$RUNNER_TEMP/results.json" \
             https://raw.githubusercontent.com/saboten-no-hana/racecard/main/data/results.json \
             || { echo "本番に results.json がまだないので、見本を使う"; rm -f "$RUNNER_TEMP/results.json"; }
+          curl -fsSL --retry 2 -o "$RUNNER_TEMP/retired.json" \
+            https://raw.githubusercontent.com/saboten-no-hana/racecard/main/data/retired.json \
+            || { echo "本番に retired.json がまだないので、見本を使う"; rm -f "$RUNNER_TEMP/retired.json"; }
       - name: テスト環境用に組み立てる
-        run: python3 stage/build.py site _site --races "$RUNNER_TEMP/races.json" --results "$RUNNER_TEMP/results.json"
+        run: python3 stage/build.py site _site --races "$RUNNER_TEMP/races.json" --results "$RUNNER_TEMP/results.json" --retired "$RUNNER_TEMP/retired.json"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

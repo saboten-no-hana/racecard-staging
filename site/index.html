@@ -10,16 +10,16 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1f5c3a">
-<!-- OGP（og.png は tools/make_og.py で作る。架空の馬名の縦長カード＋作成ページ＋説明文。クラブの勝負服は Wikimedia Commons の CC0 画像。作り直したら ?v= の番号を上げる＝X のカードのキャッシュ対策） -->
+<!-- OGP（og.png は tools/make_og.py で作る。架空の馬名の縦長カード＋作成ページ（タブつき）＋説明文。クラブの勝負服は Wikimedia Commons の CC0 画像。作り直したら ?v= の番号を上げる＝X のカードのキャッシュ対策） -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="出資馬出走カードメーカー">
 <meta property="og:title" content="出資馬出走カードメーカー">
 <meta property="og:description" content="今週末に出走する一口出資馬を、勝負服・レース番号・枠色つき馬番入りの1枚の画像に。複数クラブ対応・無料・登録不要。">
 <meta property="og:url" content="https://saboten-no-hana.github.io/racecard/">
-<meta property="og:image" content="https://saboten-no-hana.github.io/racecard/og.png?v=8">
+<meta property="og:image" content="https://saboten-no-hana.github.io/racecard/og.png?v=9">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="ツールの紹介と、作成ページ・出走予定の出資馬を勝負服つきで並べた縦長の画像の例">
+<meta property="og:image:alt" content="ツールの紹介と、出走カード・結果カードのタブがある作成ページ・出走予定の出資馬を勝負服つきで並べた縦長の画像の例">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -185,6 +185,15 @@ details.transfer[open]{padding-bottom:12px;display:grid;gap:12px}
 .mylist{display:flex;flex-wrap:wrap;gap:6px}
 .mylist span{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:2px 4px 2px 10px;font-size:13px;background:var(--surface-2)}
 .mylist button{border:0;background:transparent;padding:2px 6px;font-size:14px;color:var(--muted)}
+.mylist small.ret{color:var(--danger);font-weight:700}
+/* 登録抹消になった★の馬のバナー（10/29〜） */
+.banner.retired{display:grid;gap:6px;justify-content:stretch}
+.rlist{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.rlist li{display:flex;gap:4px 10px;align-items:center;flex-wrap:wrap;padding:5px 0;border-top:1px dashed var(--line)}
+.rlist li>div{flex:1 1 180px;min-width:0}
+.rlist small{display:block;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.rlist button{padding:4px 10px;font-size:13px}
+.banner.retired .rkeep{justify-self:end}
 .tstatus{font-size:13px;color:var(--accent);min-height:1.2em;margin:0}
 .mylist small{color:var(--muted);font-size:11px}
 .bprev{display:flex;flex-wrap:wrap;gap:6px}
@@ -223,6 +232,7 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
     <section class="picker" id="picker" aria-label="今週の出走馬から選ぶ">
       <div class="picker-head"><h2>今週の出走馬から選ぶ</h2><span class="upd" id="p-upd">出馬表を読み込み中…</span></div>
       <div class="pstate" id="p-state" role="status" hidden></div>
+      <div id="p-retired"></div>
       <div id="p-banners"></div>
       <div class="picker-filters">
         <label class="fld"><span>クラブ</span><select id="p-club"></select></label>
@@ -405,6 +415,7 @@ if(state.settings.size==='1:1') state.settings.size='4:5'; /* 正方形は廃止
 state.myHorses = Array.isArray(state.myHorses)?state.myHorses:[];
 state.myNames = state.myNames||{};
 state.myPending = Array.isArray(state.myPending)?state.myPending:[]; /* 馬名だけで★予約中（出馬表に出たら馬IDの★へ） */
+state.retiredSeen = Array.isArray(state.retiredSeen)?state.retiredSeen:[]; /* 登録抹消のバナーで「このまま残す」にした馬（「馬名|抹消日」。10/29〜） */
 state.settings.custom = {...DEFAULT_CUSTOM,...(state.settings.custom||{})};
 
 let saveT, pngBlob=null;
@@ -831,6 +842,8 @@ const myCode=()=>encodeMine(state.myHorses,state.myPending,state.myNames);
 const myTotal=()=>state.myHorses.length+state.myPending.length;
 function shareLink(){ return location.origin+location.pathname+'#star='+encodeURIComponent(myCode()); }
 function renderTransfer(){
+  const RM=retiredMine(), rset=new Set(RM.map(r=>r.name)); renderRetired(RM); /* 登録抹消になった★の馬（10/29〜） */
+  const tagR=n=>rset.has(n)?'<small class="ret">登録抹消</small>':'';
   $('#t-count').textContent=myTotal(); $('#t-clear').hidden=!myTotal();
   if(!$('#t-qrbox').hidden) showQR();
   $('#t-code').value=myTotal()?myCode():'';
@@ -839,9 +852,54 @@ function renderTransfer(){
   const q=($('#t-q').value||'').trim().normalize('NFKC').replace(/[\u3041-\u3096]/g,c=>String.fromCharCode(c.charCodeAt(0)+0x60)), hit=n=>!q||String(n).includes(q);
   const ids=state.myHorses.filter(id=>hit(state.myNames[id]||'')), pend=state.myPending.filter(hit);
   if(q&&!ids.length&&!pend.length){ $('#t-list').innerHTML='<p class="pempty">「'+esc(q)+'」を含む★の馬はいません。</p>'; return; }
-  $('#t-list').innerHTML=(ids.map(id=>`<span>${esc(state.myNames[id]||('ID '+id))}<button type="button" data-id="${id}" aria-label="★を外す" title="★を外す">✕</button></span>`).join('')
-    +pend.map(n=>`<span>${esc(n)}<small>出走待ち</small><button type="button" data-name="${esc(n)}" aria-label="★を外す" title="★を外す">✕</button></span>`).join(''))||'<p class="pempty">まだ★を付けた馬はいません。</p>';
+  $('#t-list').innerHTML=(ids.map(id=>`<span>${esc(state.myNames[id]||('ID '+id))}${tagR(state.myNames[id])}<button type="button" data-id="${id}" aria-label="★を外す" title="★を外す">✕</button></span>`).join('')
+    +pend.map(n=>`<span>${esc(n)}<small>出走待ち</small>${tagR(n)}<button type="button" data-name="${esc(n)}" aria-label="★を外す" title="★を外す">✕</button></span>`).join(''))||'<p class="pempty">まだ★を付けた馬はいません。</p>';
 }
+/* ---------- 登録抹消になった★の馬（10/29〜、data/retired.json） ----------
+   ★の馬（馬IDの★は覚えている馬名、出走待ちは保存した馬名）を馬名で照合し、登録抹消になった馬をバナーで知らせる。
+   ★を外すのは利用者（自動では外さない。地方へ移籍してクラブのまま戻ってくる馬もいるため）。
+   中央の現役の登録馬名は重複しないので馬名で照合する。出走待ちの名前は確かめずに保存したものなので、父・母を添えて利用者が確かめられるようにする。
+   抹消日より後の出馬表に同じ名前の馬が載っていれば（再登録など）知らせない。retired.json は★がある時だけ読む */
+let RETIRED=null, retiredLoading=false;
+const nkey=s=>String(s||'').normalize('NFKC').trim();
+function retiredMine(){
+  if(!RETIRED){ if(!retiredLoading&&myTotal()) loadRetired(); return []; }
+  const back=(n,d)=>RACES&&RACES.horses.some(x=>x.name===n&&x.date>d), out=[], seen=new Set();
+  const hit=(name,ref)=>{ const r=RETIRED.get(nkey(name)); if(!r||back(name,r.date)||seen.has(name)) return; seen.add(name); out.push({...r,name,...ref}); };
+  state.myHorses.forEach(id=>{ if(state.myNames[id]) hit(state.myNames[id],{id}); });
+  state.myPending.forEach(n=>hit(n,{pending:true}));
+  return out.sort((a,b)=>b.date.localeCompare(a.date)||a.name.localeCompare(b.name,'ja'));
+}
+async function loadRetired(){
+  retiredLoading=true;
+  try{
+    const r=await fetch('data/retired.json',{cache:'no-cache'}); if(!r.ok) throw new Error(r.status);
+    const d=await r.json(), m=new Map();
+    /* 新しい抹消日から読むので、同じ名前が2回あれば新しい方 */
+    Object.keys(d.horses||{}).sort().reverse().forEach(date=>(d.horses[date]||[]).forEach(([n,sire,dam])=>{ const k=nkey(n); if(!m.has(k)) m.set(k,{date,sire:sire||'',dam:dam||''}); }));
+    RETIRED=m;
+    /* 「このまま残す」の記録は、一覧から消えた馬（1年を過ぎた馬）の分を捨てる */
+    const keep=state.retiredSeen.filter(k=>{ const [n,dt]=k.split('|'), x=m.get(nkey(n)); return x&&x.date===dt; });
+    if(keep.length!==state.retiredSeen.length){ state.retiredSeen=keep; save(); }
+    renderTransfer();
+  }catch(e){ /* 読めない時は何も出さない（出走カードの他の動きには関係しない） */ }
+}
+const rkey=r=>r.name+'|'+r.date;
+function renderRetired(RM){
+  const el=$('#p-retired'), xs=RM.filter(r=>!state.retiredSeen.includes(rkey(r)));
+  if(!xs.length){ el.innerHTML=''; return; }
+  el.innerHTML=`<div class="banner retired"><p>★を付けた馬のうち <b>${xs.length}頭</b> が登録抹消になっています。</p>
+    <ul class="rlist">${xs.map(r=>`<li><div><b>${esc(r.name)}</b>${r.pending?'（出走待ち）':''}<small>${esc(md(r.date))} 抹消${r.sire||r.dam?`・父 ${esc(r.sire)}／母 ${esc(r.dam)}`:''}</small></div>`
+      +`<button type="button" data-rname="${esc(r.name)}">★を外す</button></li>`).join('')}</ul>
+    <button type="button" class="ghost rkeep" data-rkeep="1">このまま残す</button></div>`;
+}
+$('#p-retired').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.rkeep){ retiredMine().forEach(r=>{ const k=rkey(r); if(!state.retiredSeen.includes(k)) state.retiredSeen.push(k); }); }
+  else if(b.dataset.rname){ const n=b.dataset.rname;
+    state.myHorses=state.myHorses.filter(id=>state.myNames[id]!==n); state.myPending=state.myPending.filter(x=>x!==n); }
+  else return;
+  save(); renderTransfer(); if(RACES) renderPicker(); });
+
 /* 出走待ちの馬名が今週の出馬表に出ていれば、馬IDの★に切り替える（現役の登録馬名は重複しないので名前で照合） */
 function resolvePending(){
   if(!RACES||!state.myPending.length) return 0; let n=0;

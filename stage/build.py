@@ -10,9 +10,10 @@ site/（本番 racecard のあるコミットの中身をそのまま写した�
 - manifest: ホーム画面に追加した時に本番と見分けられる名前
 - data/races.json: 指定があれば本番の最新に差し替える（JRA にはアクセスしない）
 - data/results.json: 本番の最新があれば差し替え、なければ stage/sample/results.json（実際の結果。10/25 日曜の全場・クラブ馬96頭。結果カードの確認用）
+- data/retired.json: 本番の最新があれば差し替え、なければ stage/sample/retired.json（実際の登録抹消。9/24〜10/25 の347頭。10/29 の調査で取ったもの。登録抹消のバナーの確認用）
 
 書き換えが効かなかった時（本番のコードの形が変わった時）は失敗にする。
-使い方: python3 stage/build.py site _site [--races races.json] [--results results.json]
+使い方: python3 stage/build.py site _site [--races races.json] [--results results.json] [--retired retired.json]
 """
 import argparse
 import json
@@ -42,6 +43,7 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--races')
     ap.add_argument('--results')
+    ap.add_argument('--retired')
     a = ap.parse_args()
     src, out = Path(a.src), Path(a.out)
     if out.exists():
@@ -133,9 +135,19 @@ def main():
     elif (out / 'data' / 'results.json').exists():
         rnote = '反映したコミットのもの'
 
+    # 7. 登録抹消（★の馬の登録抹消のバナー用、10/29〜）
+    tnote = 'なし'
+    tsample = Path(__file__).parent / 'sample' / 'retired.json'
+    if okjson(a.retired):
+        shutil.copyfile(a.retired, out / 'data' / 'retired.json'); tnote = '本番の最新'
+    elif not (out / 'data' / 'retired.json').exists() and tsample.exists():
+        shutil.copyfile(tsample, out / 'data' / 'retired.json'); tnote = '見本（stage/sample）'
+    elif (out / 'data' / 'retired.json').exists():
+        tnote = '反映したコミットのもの'
+
     (out / '.nojekyll').touch()
     print(f'元のコミット: {source}')
-    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}、results.json は{rnote}')
+    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}、results.json は{rnote}、retired.json は{tnote}')
 
 
 if __name__ == '__main__':
