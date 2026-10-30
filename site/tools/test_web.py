@@ -72,7 +72,8 @@ class TestWeb(unittest.TestCase):
         except ImportError:
             self.skipTest('zxing-cpp がない')
         base = 'https://saboten-no-hana.github.io/racecard/#star=RC3%3A'
-        texts = [base + 'xfbail', base + ('xfbail_1h012k2c072b14.' * 12), base + ('xfbail_1h012k2c072b14.' * 30), '日本語 ファーヴェント']
+        base4 = 'https://saboten-no-hana.github.io/racecard/#star=RC4%3A'  # 命名馬の印「!」つき（10/30〜）
+        texts = [base + 'xfbail', base + ('xfbail_1h012k2c072b14.' * 12), base + ('xfbail_1h012k2c072b14.' * 30), base4 + ('xfbail_1h012k2c072b14!.' * 12) + '~020g21!', '日本語 ファーヴェント']
         js = ("global.window={};require(%r);const t=JSON.parse(require('fs').readFileSync(0,'utf8'));"
               "console.log(JSON.stringify(t.map(s=>{const q=window.makeQR(s);const r=[];"
               "for(let y=0;y<q.size;y++){let l='';for(let x=0;x<q.size;x++)l+=q.dark(x,y)?'1':'0';r.push(l);}return r;})))") % os.path.join(ROOT, 'qr.js')

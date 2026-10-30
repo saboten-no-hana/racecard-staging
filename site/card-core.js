@@ -425,14 +425,42 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
     if(ax+awW<=right){ ctx.font=`700 ${awFs}px ${F.body}`; ctx.fillStyle=scr?T.sub:T.fg; ctx.globalAlpha=scr?1:.85; ctx.fillText(aw,ax,cy+chipH*.5+awFs*.36); ctx.globalAlpha=1; }
     else awLine=aw; }
   cy+=chipH+g;
-  const nm=fit(ctx,hr.name||'（馬名）',900,F.body,sB,tw); ctx.fillStyle=scr?T.sub:T.fg; ctx.fillText(nm.t,tx,cy+sB*.86);
-  if(scr){ const nw=ctx.measureText(nm.t).width; ctx.fillRect(tx,cy+sB*.86-nm.s*.34,nw,Math.max(2,nm.s*.07)); }
+  /* 馬名は省略しない（10/30〜、結果カードと同じ drawNameNoCut。以前は入らない時「…」で切っていた）。命名馬は馬名の右にバッジ（10/30〜） */
+  const named=!!(S._named&&hr.name&&S._named.has(hr.name));
+  const nm=drawHorseName(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,scr?T.sub:T.fg,named,T,sA,!!scr);
+  if(scr){ ctx.fillRect(tx,cy+sB*.86-nm.s*.34,nm.w,Math.max(2,nm.s*.07)); }
   cy+=sB+g;
   const lc=hr.raceName||'';
   const c=fit(ctx,lc,700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
   /* 性齢を3行目に回した時は、距離と斤量の間に置き（10/22、私の指定）、「発走」を省いて文字が小さくなりすぎないようにする */
   const ld=[hr.time?hr.time+(awLine?'':' 発走'):'', (hr.surface||'')+(hr.dist?hr.dist+'m':''), awLine, kg, hr.jockey].filter(Boolean).join('　');
   const d=fit(ctx,ld,500,F.body,sD,tw); ctx.fillStyle=T.sub; ctx.fillText(d.t,tx,cy+sD*.86);
+}
+
+/* 馬名を省略せずに描く（結果カードから移した。10/30〜出走カードも）: 72%まで縮め、それでも入らなければ横に詰める。戻り値 {w: 描いた幅, s: 文字の大きさ} */
+function drawNameNoCut(ctx,t,size,x,base,maxW,color){
+  let s=Math.round(size); ctx.font=`900 ${s}px ${F.body}`; let w=ctx.measureText(t).width;
+  const min=Math.round(size*.72);
+  while(w>maxW && s>min){ s--; ctx.font=`900 ${s}px ${F.body}`; w=ctx.measureText(t).width; }
+  ctx.fillStyle=color;
+  if(w<=maxW){ ctx.fillText(t,x,base); return {w,s}; }
+  ctx.save(); ctx.translate(x,base); ctx.scale(maxW/w,1); ctx.fillText(t,0,0); ctx.restore(); return {w:maxW,s};
+}
+/* 命名馬のバッジ（10/30〜）: 馬名の右にアクセント色の塗り。角を小さく丸めて、丸い口取りのバッジと見分けられるようにする */
+const NAMED_LABEL='命名馬';
+function namedBadgeW(ctx,fs){ ctx.font=`900 ${fs}px ${F.body}`; return ctx.measureText(NAMED_LABEL).width+fs*1.1; }
+function drawNamedBadge(ctx,x,mid,fs,T){
+  const w=namedBadgeW(ctx,fs), h=fs*1.55; rr(ctx,x,mid-h/2,w,h,h*.22); ctx.fillStyle=T.accent; ctx.fill();
+  ctx.fillStyle=T.accentInk; ctx.textAlign='left'; ctx.fillText(NAMED_LABEL,x+fs*.55,mid+fs*.36); return w; }
+/* 馬名（＋命名馬ならバッジ）。バッジは必ず入れ、その分馬名を縮める。命名馬でない時は drawNameNoCut と同じ描画。
+   fsBase はクラブ名の文字の大きさ（バッジもこの大きさ）。dim は取消・除外・競走中止など（バッジを薄く） */
+function drawHorseName(ctx,name,size,x,base,maxW,color,named,T,fsBase,dim){
+  if(!named) return drawNameNoCut(ctx,name,size,x,base,maxW,color);
+  const fs=Math.round(fsBase), gap=fs*.5, bw=namedBadgeW(ctx,fs);
+  const r=drawNameNoCut(ctx,name,size,x,base,Math.max(20,maxW-bw-gap),color);
+  if(dim) ctx.globalAlpha=.55;
+  drawNamedBadge(ctx,x+r.w+gap,base-r.s*.36,fs,T);
+  ctx.globalAlpha=1; ctx.fillStyle=color; return r;
 }
 
 /* 斤量の表示: 57.0 → 57kg、57.5 → 57.5kg */
@@ -449,5 +477,5 @@ function rangeText(horses){
 const imgCache={};
 function loadImg(src){ if(imgCache[src]) return Promise.resolve(imgCache[src]); return new Promise(r=>{ const i=new Image(); i.onload=()=>{imgCache[src]=i;r(i);}; i.onerror=()=>r(null); i.src=src; }); }
 
-window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, kgText, rangeText, imgCache, loadImg };
+window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, drawNameNoCut, NAMED_LABEL, namedBadgeW, drawNamedBadge, drawHorseName, kgText, rangeText, imgCache, loadImg };
 })();

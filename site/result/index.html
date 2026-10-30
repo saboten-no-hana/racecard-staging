@@ -309,6 +309,7 @@ a.inl{color:var(--accent);font-weight:700}
         <label><input type="checkbox" id="s-count">頭数を載せる</label>
         <label><input type="checkbox" id="s-tally">着別度数を載せる</label>
         <label><input type="checkbox" id="s-aw">性齢を載せる</label>
+        <label><input type="checkbox" id="s-named">命名馬を載せる</label>
       </div>
       <label class="fld"><span>投稿文（「X(Twitter)に投稿」の投稿画面に入る本文。説明やハッシュタグ等）</span><textarea id="s-post" rows="4"></textarea></label>
       <div class="post-tools"><button type="button" id="s-list">結果一覧を入れる</button><span id="s-len" class="hint" aria-live="polite"></span></div>
@@ -340,7 +341,7 @@ a.inl{color:var(--accent);font-weight:700}
 (() => {
 /* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
    保存データは racecard.result.v1。出走カードの racecard.v2 は読むだけで書き換えない（★と、出走カードに入れた馬を取り込むため） */
-const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, rangeText, loadImg } = window.RCCore;
+const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawHorseName, rangeText, loadImg } = window.RCCore;
 const COLOR_NAMES = Object.keys(COLORS);
 const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
 const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
@@ -388,14 +389,6 @@ function drawFinishBlock(ctx,bx,by,bw,bh,fi,T,r){
   ctx.textAlign='left';
 }
 /* 馬名は絶対に省略しない（10/23、私の指定）: 文字を小さくし、0.72倍まで縮めても入らなければ横に詰めて描く */
-function drawNameNoCut(ctx,t,size,x,base,maxW,color){
-  let s=Math.round(size); ctx.font=`900 ${s}px ${F.body}`; let w=ctx.measureText(t).width;
-  const min=Math.round(size*.72);
-  while(w>maxW && s>min){ s--; ctx.font=`900 ${s}px ${F.body}`; w=ctx.measureText(t).width; }
-  ctx.fillStyle=color;
-  if(w<=maxW){ ctx.fillText(t,x,base); return {w}; }
-  ctx.save(); ctx.translate(x,base); ctx.scale(maxW/w,1); ctx.fillText(t,0,0); ctx.restore(); return {w:maxW};
-}
 function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   const fi=finishInfo(hr), pt=popText(hr), win=fi.n===1, out=!ran(hr);
   ctx.fillStyle=T.row; rr(ctx,x,y,w,h,h*.12); ctx.fill(); ctx.strokeStyle=win?MEDAL[1].bg:T.rowLine; ctx.lineWidth=win?3:1.5; ctx.stroke();
@@ -431,7 +424,9 @@ function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(club){ const f=fit(ctx,club,700,F.body,sA,Math.max(20,Math.min(tw*.7,tw-awW-sA*1.1))); const cw=ctx.measureText(f.t).width+sA*1.1; rr(ctx,cx,cy,cw,chipH,chipH*.25); ctx.fillStyle=T.chipBg; ctx.fill(); ctx.fillStyle=T.chipFg; ctx.fillText(f.t,cx+sA*.55,cy+chipH*.5+f.s*.36); cx+=cw+sA*.6; }
   if(aw){ ctx.font=`700 ${Math.round(sA)}px ${F.body}`; if(cx+ctx.measureText(aw).width<=tx+tw){ ctx.fillStyle=T.fg; ctx.globalAlpha=.85; ctx.fillText(aw,cx,cy+chipH*.5+sA*.36); ctx.globalAlpha=1; } }
   cy+=chipH+g;
-  const nm=drawNameNoCut(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,out?T.sub:T.fg);
+  /* 馬名は省略しない。命名馬は馬名の右にバッジ（10/30〜、出走カードの★の一覧・編集欄で登録したもの。racecard.v2 の myNamed を読むだけ） */
+  const named=!!(S._named&&hr.name&&S._named.has(hr.name));
+  const nm=drawHorseName(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,out?T.sub:T.fg,named,T,sA,out);
   if(out){ ctx.fillRect(tx,cy+sB*.86-sB*.34,nm.w,Math.max(2,sB*.07)); }
   cy+=sB+g;
   const c=fit(ctx,hr.raceName||'',700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
@@ -446,7 +441,7 @@ let CARD=readCard();
 function defaults(){
   const cs=CARD.settings||{}; /* 初めて開いた時は、出走カードのアカウント名・デザイン・サイズなどを引き継ぐ */
   return { settings:{title:'出走結果',post:null,handle:cs.handle||'@your_account',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size==='16:9'?'16:9':'4:5',order:cs.order||'venue',
-    showCount:cs.showCount!==false,showTally:true,showAgeWeight:cs.showAgeWeight!==false,skipPostGuide:!!cs.skipPostGuide,custom:{...DEFAULT_CUSTOM,...(cs.custom||{})}}, horses:[] };
+    showCount:cs.showCount!==false,showTally:true,showAgeWeight:cs.showAgeWeight!==false,showNamed:cs.showNamed!==false,skipPostGuide:!!cs.skipPostGuide,custom:{...DEFAULT_CUSTOM,...(cs.custom||{})}}, horses:[] };
 }
 let state;
 try{ state=JSON.parse(localStorage.getItem(KEY)); }catch(e){ state=null; }
@@ -498,8 +493,10 @@ async function render(){
   if(!hs.length){
     ctx.font=`700 ${Math.round(ts*.45)}px ${F.body}`; ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText('出走した出資馬を追加してください',W/2,(top+bottom)/2); ctx.textAlign='left';
   } else {
+    /* 命名馬（10/30〜）: 出走カードの保存データ（racecard.v2）の myNamed（馬名）を読むだけ */
+    const NS=S.showNamed!==false&&Array.isArray(CARD.myNamed)&&CARD.myNamed.length?new Set(CARD.myNamed):null, SR=NS?{...S,_named:NS}:S;
     const drawCol=(p,x,y0,colW)=>{ let y2=y0;
-      p.forEach(e=>{ if(e.t==='day'){ const dh=L.rowH*DAY; drawDay(ctx,x,y2,colW,dh,e,T); y2+=dh; } else if(e.t==='venue'){ const vh=L.rowH*VEN; drawVenue(ctx,x,y2,colW,vh,e,T); y2+=vh; } else { drawResultRow(ctx,x,y2,colW,L.rowH,e.h,T,S,imgs); y2+=L.rowH*(1+GAP); } });
+      p.forEach(e=>{ if(e.t==='day'){ const dh=L.rowH*DAY; drawDay(ctx,x,y2,colW,dh,e,T); y2+=dh; } else if(e.t==='venue'){ const vh=L.rowH*VEN; drawVenue(ctx,x,y2,colW,vh,e,T); y2+=vh; } else { drawResultRow(ctx,x,y2,colW,L.rowH,e.h,T,SR,imgs); y2+=L.rowH*(1+GAP); } });
       return y2; };
     if(L.flow) L.flow.forEach((p,ci)=>drawCol(p,pad+ci*(L.colW+L.gap),top,L.colW));
     else { let yy=top;
@@ -621,7 +618,7 @@ function syncSettings(){ const S=state.settings;
   document.querySelectorAll('input[name=theme]').forEach(r=>r.checked=r.value===S.theme);
   document.querySelectorAll('input[name=size]').forEach(r=>r.checked=r.value===S.size);
   document.querySelectorAll('input[name=order]').forEach(r=>r.checked=r.value===S.order);
-  $('#s-count').checked=S.showCount; $('#s-tally').checked=S.showTally; $('#s-aw').checked=S.showAgeWeight!==false; showPostLen(); }
+  $('#s-count').checked=S.showCount; $('#s-tally').checked=S.showTally; $('#s-aw').checked=S.showAgeWeight!==false; $('#s-named').checked=S.showNamed!==false; showPostLen(); }
 $('#s-title').addEventListener('input',e=>{state.settings.title=e.target.value; if(state.settings.post==null) $('#s-post').value=e.target.value; schedule();save();showPostLen();});
 $('#s-handle').addEventListener('input',e=>{state.settings.handle=e.target.value;schedule();save();});
 $('#s-post').addEventListener('input',e=>{ const v=e.target.value; state.settings.post = v.trim() ? v : null; save(); showPostLen(); });
@@ -648,7 +645,7 @@ $('#s-list').addEventListener('click',()=>{ const L=resultLines(); if(!L.length)
 document.querySelectorAll('input[name=theme]').forEach(r=>r.addEventListener('change',()=>{state.settings.theme=r.value;syncCustom();schedule();save();}));
 document.querySelectorAll('input[name=size]').forEach(r=>r.addEventListener('change',()=>{state.settings.size=r.value;schedule();save();}));
 document.querySelectorAll('input[name=order]').forEach(r=>r.addEventListener('change',()=>{state.settings.order=r.value;schedule();save();}));
-[['#s-count','showCount'],['#s-tally','showTally'],['#s-aw','showAgeWeight']].forEach(([s,k])=>$(s).addEventListener('change',e=>{state.settings[k]=e.target.checked;schedule();save();}));
+[['#s-count','showCount'],['#s-tally','showTally'],['#s-aw','showAgeWeight'],['#s-named','showNamed']].forEach(([s,k])=>$(s).addEventListener('change',e=>{state.settings[k]=e.target.checked;schedule();save();}));
 function syncCustom(){ const c=state.settings.custom, on=state.settings.theme==='custom';
   $('#custom-box').hidden=!on; $('#c-bg').value=c.bg; $('#c-accent').value=c.accent; $('#c-dim').value=c.dim; $('#c-dim-val').textContent=c.dim+'%';
   $('#c-thumb').hidden=!c.image; if(c.image) $('#c-thumb').src=c.image; $('#c-img-del').hidden=!c.image; $('#c-dim-wrap').hidden=!c.image;
@@ -796,8 +793,8 @@ $('#p-reload').addEventListener('click',async e=>{ const b=e.target; b.disabled=
 /* 開催日にページを開いたままにしている時は、5分ごとに結果を読み直す（画面が見えている時だけ） */
 setInterval(()=>{ if(document.visibilityState==='visible'&&POOL.some(x=>x.date===todayYmd()&&!x.finish)) loadData(); },5*60e3);
 /* 出走カードで★を付け外しして戻ってきた時に読み直す */
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ CARD=readCard(); renderPicker(); } });
-window.addEventListener('pageshow',e=>{ if(e.persisted){ CARD=readCard(); renderPicker(); } });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ CARD=readCard(); renderPicker(); schedule(); } }); /* 命名馬（myNamed）が変わっていれば画像にも反映 */
+window.addEventListener('pageshow',e=>{ if(e.persisted){ CARD=readCard(); renderPicker(); schedule(); } });
 
 syncSettings(); syncCustom(); renderList(); (document.fonts?document.fonts.ready:Promise.resolve()).then(schedule); loadData();
 if('serviceWorker' in navigator&&location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
