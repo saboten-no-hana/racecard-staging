@@ -341,7 +341,7 @@ a.inl{color:var(--accent);font-weight:700}
 (() => {
 /* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
    保存データは racecard.result.v1。出走カードの racecard.v2 は読むだけで書き換えない（★と、出走カードに入れた馬を取り込むため） */
-const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawHorseName, rangeText, loadImg } = window.RCCore;
+const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawNameNoCut, drawNamedOnSilks, rangeText, loadImg } = window.RCCore;
 const COLOR_NAMES = Object.keys(COLORS);
 const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
 const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
@@ -407,6 +407,8 @@ function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(out) ctx.globalAlpha=.45;
   if(simg) drawSilksImg(ctx,simg,sx,sy,ss,T.halo); else drawSilks(ctx,sx,sy,ss,silksHex(hr),T.halo);
   ctx.globalAlpha=1;
+  /* 命名馬（10/30〜）: 勝負服の裾にバッジ（出走カードと同じ）。出走カードの★の一覧・編集欄で登録したもの（racecard.v2 の myNamed を読むだけ） */
+  if(S._named&&hr.name&&S._named.has(hr.name)) drawNamedOnSilks(ctx,sx,sy,ss,clamp(h*.105,8,21),T,out);
   const tx=sx+ss+ip*.8; let right=x+w-ip;
   /* 右端: 上に人気、その下に大きな着順。狭い行（2列など）は着順の枠を細くして馬名の幅を空ける */
   const narrow=w<h*5.2; const fw=h*(narrow?.62:.78), fx=right-fw;
@@ -424,9 +426,7 @@ function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(club){ const f=fit(ctx,club,700,F.body,sA,Math.max(20,Math.min(tw*.7,tw-awW-sA*1.1))); const cw=ctx.measureText(f.t).width+sA*1.1; rr(ctx,cx,cy,cw,chipH,chipH*.25); ctx.fillStyle=T.chipBg; ctx.fill(); ctx.fillStyle=T.chipFg; ctx.fillText(f.t,cx+sA*.55,cy+chipH*.5+f.s*.36); cx+=cw+sA*.6; }
   if(aw){ ctx.font=`700 ${Math.round(sA)}px ${F.body}`; if(cx+ctx.measureText(aw).width<=tx+tw){ ctx.fillStyle=T.fg; ctx.globalAlpha=.85; ctx.fillText(aw,cx,cy+chipH*.5+sA*.36); ctx.globalAlpha=1; } }
   cy+=chipH+g;
-  /* 馬名は省略しない。命名馬は馬名の右にバッジ（10/30〜、出走カードの★の一覧・編集欄で登録したもの。racecard.v2 の myNamed を読むだけ） */
-  const named=!!(S._named&&hr.name&&S._named.has(hr.name));
-  const nm=drawHorseName(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,out?T.sub:T.fg,named,T,sA,out);
+  const nm=drawNameNoCut(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,out?T.sub:T.fg);
   if(out){ ctx.fillRect(tx,cy+sB*.86-sB*.34,nm.w,Math.max(2,sB*.07)); }
   cy+=sB+g;
   const c=fit(ctx,hr.raceName||'',700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;

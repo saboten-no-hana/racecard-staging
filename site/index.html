@@ -245,7 +245,7 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
       <div class="checks"><label><input type="checkbox" id="p-mine">★ 登録した出資馬だけ表示</label></div>
       <details class="transfer" id="transfer">
         <summary>★の一覧・他の端末に引き継ぐ（<span id="t-count">0</span>頭）</summary>
-        <p class="hint">「命名」を押すと命名馬になり、画像の馬名の右に「命名馬」と付きます。</p>
+        <p class="hint">「命名」を押すと命名馬になり、画像の勝負服に「命名馬」と付きます。</p>
         <label class="fld t-find" id="t-find" hidden><span>★の馬を馬名で絞り込む</span><input type="text" id="t-q" placeholder="カタカナ・ひらがなの一部でも可" autocomplete="off"></label>
         <div class="mylist" id="t-list"></div>
         <div class="t-clear"><button type="button" class="danger" id="t-clear" hidden>★をすべて外す</button></div>
@@ -421,7 +421,7 @@ if(state.settings.size==='1:1') state.settings.size='4:5'; /* 正方形は廃止
 state.myHorses = Array.isArray(state.myHorses)?state.myHorses:[];
 state.myNames = state.myNames||{};
 state.myPending = Array.isArray(state.myPending)?state.myPending:[]; /* 馬名だけで★予約中（出馬表に出たら馬IDの★へ） */
-state.myNamed = Array.isArray(state.myNamed)?state.myNamed:[]; /* 命名馬（馬名。10/30〜）: ★の一覧・出走馬の編集欄で付け外し。画像の馬名の右に「命名馬」。出走待ちから馬IDの★に変わってもそのまま */
+state.myNamed = Array.isArray(state.myNamed)?state.myNamed:[]; /* 命名馬（馬名。10/30〜）: ★の一覧・出走馬の編集欄で付け外し。画像の勝負服の裾に「命名馬」。出走待ちから馬IDの★に変わってもそのまま */
 state.retiredSeen = Array.isArray(state.retiredSeen)?state.retiredSeen:[]; /* 登録抹消のバナーで「このまま残す」にした馬（「馬名|抹消日」。10/29〜） */
 state.settings.custom = {...DEFAULT_CUSTOM,...(state.settings.custom||{})};
 
@@ -551,7 +551,7 @@ function cardHTML(h,open){
     <fieldset class="fld"><legend>口取り</legend><div class="seg">
       ${KUCHI.map(([v,l])=>`<label><input type="radio" name="kuchi-${id}" id="k-${v}-${id}" data-f="kuchi" value="${v}"${h.kuchi===v?' checked':''}><span>${l}</span></label>`).join('')}
     </div></fieldset>
-    <div class="checks"><label><input type="checkbox" id="nm-${id}" data-act="named"${isNamed(h.name)?' checked':''}${h.name?'':' disabled'}><span>命名馬（自分が名付けた馬。画像の馬名の右に「命名馬」と付きます）</span></label></div>
+    <div class="checks"><label><input type="checkbox" id="nm-${id}" data-act="named"${isNamed(h.name)?' checked':''}${h.name?'':' disabled'}><span>命名馬（自分が名付けた馬。画像の勝負服に「命名馬」と付きます）</span></label></div>
     <details class="silks-edit"${h.customSilks?' open':''}>
       <summary>${clubById(h.clubId)?.img?'勝負服を自分で設定（クラブの勝負服の代わりに使う）':'勝負服を設定'}</summary>
       <div class="g g5">
