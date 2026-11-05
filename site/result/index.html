@@ -308,7 +308,7 @@ a.inl{color:var(--accent);font-weight:700}
       <div class="checks">
         <label><input type="checkbox" id="s-count">頭数を載せる</label>
         <label><input type="checkbox" id="s-tally">着別度数を載せる</label>
-        <label><input type="checkbox" id="s-aw">性齢を載せる</label>
+        <label><input type="checkbox" id="s-aw">性齢・斤量を載せる</label>
         <label><input type="checkbox" id="s-named">命名馬を載せる</label>
         <label><input type="checkbox" id="s-bold">距離・騎手の行を太字にする</label>
       </div>
@@ -342,7 +342,7 @@ a.inl{color:var(--accent);font-weight:700}
 (() => {
 /* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
    保存データは racecard.result.v1。出走カードの racecard.v2 は読むだけで書き換えない（★と、出走カードに入れた馬を取り込むため） */
-const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawNameNoCut, drawNamedOnSilks, rangeText, loadImg } = window.RCCore;
+const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawNameNoCut, drawNamedOnSilks, kgText, rangeText, loadImg } = window.RCCore;
 const COLOR_NAMES = Object.keys(COLORS);
 const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
 const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
@@ -431,7 +431,8 @@ function drawResultRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(out){ ctx.fillRect(tx,cy+sB*.86-sB*.34,nm.w,Math.max(2,sB*.07)); }
   cy+=sB+g;
   const c=fit(ctx,hr.raceName||'',700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
-  const ld=[(hr.surface||'')+(hr.dist?hr.dist+'m':''), hr.jockey].filter(Boolean).join('　');
+  /* 斤量（11/06〜、私の指定）: 出走カードと同じく騎手名の前。設定「性齢・斤量を載せる」で切り替え */
+  const ld=[(hr.surface||'')+(hr.dist?hr.dist+'m':''), S.showAgeWeight!==false?kgText(hr.weight):'', hr.jockey].filter(Boolean).join('　');
   const d=fit(ctx,ld,S.boldInfo?700:500,F.body,sD,tw); ctx.fillStyle=T.sub; /* 太字は設定 boldInfo（11/05〜、既定はオフ） */ ctx.fillText(d.t,tx,cy+sD*.86);
 }
 
@@ -561,6 +562,9 @@ function cardHTML(h,open){
     <div class="g g2">
       <label class="fld"><span>騎手</span><input type="text" id="jockey-${id}" data-f="jockey" value="${esc(h.jockey)}"></label>
       <label class="fld"><span>性齢</span><input type="text" id="sa-${id}" data-f="sexAge" placeholder="牡4" value="${esc(h.sexAge||'')}"></label>
+    </div>
+    <div class="g g2">
+      <label class="fld"><span>斤量 kg</span><input type="number" id="wt-${id}" data-f="weight" step="0.5" min="40" max="70" inputmode="decimal" placeholder="57" value="${esc(h.weight||'')}"></label>
     </div>
     <details class="silks-edit"${h.customSilks?' open':''}>
       <summary>${clubById(h.clubId)?.img?'勝負服を自分で設定（クラブの勝負服の代わりに使う）':'勝負服を設定'}</summary>
@@ -742,7 +746,7 @@ function syncFromData(){ let n=0;
   state.horses.forEach(h=>{ if(!h.horseId) return; const x=POOL.find(y=>y.horseId===h.horseId&&y.date===h.date); if(!x) return; let ch=false;
     if(x.finish&&(h.finish!==x.finish||String(h.pop||'')!==String(x.pop||''))){ h.finish=x.finish; h.pop=x.pop?String(x.pop):''; ch=true; }
     if((x.status||'')!==(h.status||'')){ h.status=x.status||''; ch=true; }
-    ['jockey','sexAge'].forEach(k=>{ if(x[k]&&h[k]!==x[k]){ h[k]=x[k]; ch=true; } });
+    ['jockey','sexAge','weight'].forEach(k=>{ if(x[k]&&h[k]!==x[k]){ h[k]=x[k]; ch=true; } });
     if(ch) n++; });
   return n; }
 function addFromData(xs){ if(!xs.length) return; xs.forEach(x=>{ if(!inList(x)) state.horses.push(fromData(x)); }); renderList(); schedule(); save(); }
