@@ -348,6 +348,27 @@ function drawDay(ctx,x,y,w,dh,e,T){
   cx+=s*.5; ctx.fillStyle=T.rowLine; ctx.fillRect(cx,base-s*.33,Math.max(0,x+w-cx),2);
 }
 
+/* 右の欄（11/05〜、私の指定）: 縦長3〜5頭は、発走時刻・距離・斤量・騎手を行の右の欄に3段で置く（3段とも同じ大きさ・同じ色）。
+   欄の左端・幅・文字の大きさはカード全体でそろえる（行ごとに決めると騎手名の長さで欄がずれて見えるため）。
+   馬名の場所を優先し、欄の文字を85%まで縮めても入らない時は null を返す（カード全体を3行目の形で描く。行ごとに混ぜない）。
+   index.html が縦長3〜5頭の時だけ呼び、結果を S._info に入れて drawRow に渡す。結果カードは使わない */
+function infoPlan(ctx,hs,h,w,S){
+  const ip=h*.11, tx0=ip+h*.5+(S._anyUma?ip*.45+h*.44:0)+ip*.8+h*.72+ip*.8; /* drawRow の文字の始まり（行の左端から） */
+  const photoW=hs.some(x=>x.photo)?(h-ip*1.4)+ip*.8:0, avail=w-ip-photoW-tx0;
+  const s0=Math.round(clamp(h*.13,9,28)), wt=S.boldInfo?700:500, showAw=S.showAgeWeight!==false;
+  const m=(t,weight,size)=>{ if(!t) return 0; ctx.font=`${weight} ${size}px ${F.body}`; return ctx.measureText(t).width; };
+  let pw=0, nameW=0;
+  hs.forEach(hr=>{ const l=infoLines(hr,'',showAw);
+    pw=Math.max(pw,...l.map(t=>m(t,wt,s0))); nameW=Math.max(nameW,m(hr.name,900,Math.round(clamp(h*.25,11,52)))); });
+  const sep=ip*1.5, room=avail-sep*2-Math.min(nameW,avail*.6), k=pw?Math.min(1,room/pw):1;
+  if(k<.85) return null;
+  return {s:Math.round(s0*k), pw:pw*k, sep, photoW};
+}
+/* 右の欄の3段。性齢はクラブ名の右に入らない時だけ渡され、斤量の前に置く */
+function infoLines(hr,awLine,showAw){
+  const kg=showAw?kgText(hr.weight):'';
+  return [hr.time?hr.time+' 発走':'', (hr.surface||'')+(hr.dist?hr.dist+'m':''), [awLine,kg,hr.jockey].filter(Boolean).join('　')];
+}
 function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   ctx.fillStyle=T.row; rr(ctx,x,y,w,h,h*.12); ctx.fill(); ctx.strokeStyle=T.rowLine; ctx.lineWidth=1.5; ctx.stroke();
   const ip=h*.11;
@@ -387,6 +408,8 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   const img=hr.photo&&imgs[hr.photo];
   if(img){ const ps=h-ip*1.4, px=right-ps, py=y+(h-ps)/2; const sw=img.naturalWidth, sh=img.naturalHeight, m=Math.min(sw,sh);
     ctx.save(); rr(ctx,px,py,ps,ps,h*.08); ctx.clip(); ctx.drawImage(img,(sw-m)/2,(sh-m)/2,m,m,px,py,ps,ps); ctx.restore(); right=px-ip*.8; }
+  const P=S._info; let infoX=0; /* 右の欄（縦長3〜5頭） */
+  if(P){ const pr=x+w-ip-P.photoW; infoX=pr-P.pw; right=Math.min(right,pr)-P.pw-P.sep*2; }
   const label=scr||((S.showKuchi && hr.kuchi && hr.kuchi!=='none')?{win:'口取り 当選',wait:'口取り 抽選待ち',lose:'口取り 落選'}[hr.kuchi]:'');
   let inlineBadge=false;
   const paintBadge=(px,py,pw,ph,fs)=>{ rr(ctx,px,py,pw,ph,ph/2);
@@ -397,11 +420,11 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   if(label){
     const fs=Math.round(clamp(h*.115,11,22)); ctx.font=`900 ${fs}px ${F.body}`; const lw=ctx.measureText(label).width;
     const pw=lw+fs*1.3, ph=fs*1.9;
-    if(right-pw-tx >= w*.5){ paintBadge(right-pw,y+(h-ph)/2,pw,ph,fs); right=right-pw-ip*.7; } else inlineBadge=true;
+    if(!P && right-pw-tx >= w*.5){ paintBadge(right-pw,y+(h-ph)/2,pw,ph,fs); right=right-pw-ip*.7; } else inlineBadge=true;
   }
   const tw=Math.max(40,right-tx);
-  const sA=clamp(h*.105,8,21), sB=clamp(h*.25,11,52), sC=clamp(h*.125,8,26), sD=clamp(h*.108,8,22), g=h*.035;
-  const chipH=sA*1.55; const block=chipH+g+sB+g+sC+g*.7+sD; let cy=y+(h-block)/2;
+  const sA=clamp(h*.105,8,21), sB=clamp(h*.25,11,52), sC=clamp(h*.125,8,26)*(P?1.08:1), sD=clamp(h*.108,8,22), g=h*.035;
+  const chipH=sA*1.55; const block=P?chipH+g+sB+g*1.2+sC:chipH+g+sB+g+sC+g*.7+sD; let cy=y+(h-block)/2;
   const club=clubLabel(hr);
   const inlineB=(x0)=>{ const fs=Math.round(sA); ctx.font=`900 ${fs}px ${F.body}`; const pw=ctx.measureText(label).width+fs*1.2; if(x0+pw<=right){ paintBadge(x0,cy,pw,chipH,fs); return x0+pw; } return 0; };
   let cx0=tx, chipEnd=tx;
@@ -430,12 +453,18 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   /* 馬名は省略しない（10/30〜、結果カードと同じ drawNameNoCut。以前は入らない時「…」で切っていた） */
   const nm=drawNameNoCut(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,scr?T.sub:T.fg);
   if(scr){ ctx.fillRect(tx,cy+sB*.86-nm.s*.34,nm.w,Math.max(2,nm.s*.07)); }
-  cy+=sB+g;
+  cy+=sB+g*(P?1.2:1);
   const lc=hr.raceName||'';
   const c=fit(ctx,lc,700,F.body,sC,tw); ctx.fillStyle=T.fg; ctx.fillText(c.t,tx,cy+sC*.86); cy+=sC+g*.7;
   /* 性齢を3行目に回した時は、距離と斤量の間に置き（10/22、私の指定）、「発走」を省いて文字が小さくなりすぎないようにする */
+  const wt=S.boldInfo?700:500; /* 太字（11/05〜、設定 boldInfo・既定はオフ） */
+  if(P){ /* 右の欄: 3段とも同じ大きさ・同じ色。左に細い区切り線 */
+    const L3=infoLines(hr,awLine,S.showAgeWeight!==false), lh=P.s*1.45, b0=y+h/2-lh+P.s*.36;
+    ctx.fillStyle=T.rowLine; ctx.fillRect(infoX-P.sep,y+h*.22,1.5,h*.56);
+    ctx.fillStyle=T.sub; L3.forEach((t,i)=>{ if(!t) return; const f=fit(ctx,t,wt,F.body,P.s,P.pw+1); ctx.fillText(f.t,infoX,b0+lh*i); });
+    return; }
   const ld=[hr.time?hr.time+(awLine?'':' 発走'):'', (hr.surface||'')+(hr.dist?hr.dist+'m':''), awLine, kg, hr.jockey].filter(Boolean).join('　');
-  const d=fit(ctx,ld,500,F.body,sD,tw); ctx.fillStyle=T.sub; ctx.fillText(d.t,tx,cy+sD*.86);
+  const d=fit(ctx,ld,wt,F.body,sD,tw); ctx.fillStyle=T.sub; ctx.fillText(d.t,tx,cy+sD*.86);
 }
 
 /* 馬名を省略せずに描く（結果カードから移した。10/30〜出走カードも）: 72%まで縮め、それでも入らなければ横に詰める。戻り値 {w: 描いた幅, s: 文字の大きさ} */
@@ -476,5 +505,5 @@ function rangeText(horses){
 const imgCache={};
 function loadImg(src){ if(imgCache[src]) return Promise.resolve(imgCache[src]); return new Promise(r=>{ const i=new Image(); i.onload=()=>{imgCache[src]=i;r(i);}; i.onerror=()=>r(null); i.src=src; }); }
 
-window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, drawNameNoCut, NAMED_LABEL, namedBadgeW, drawNamedBadge, drawNamedOnSilks, kgText, rangeText, imgCache, loadImg };
+window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, infoPlan, infoLines, drawNameNoCut, NAMED_LABEL, namedBadgeW, drawNamedBadge, drawNamedOnSilks, kgText, rangeText, imgCache, loadImg };
 })();
