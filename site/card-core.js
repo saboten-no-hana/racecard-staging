@@ -348,19 +348,21 @@ function drawDay(ctx,x,y,w,dh,e,T){
   cx+=s*.5; ctx.fillStyle=T.rowLine; ctx.fillRect(cx,base-s*.33,Math.max(0,x+w-cx),2);
 }
 
-/* 右の欄（11/05〜、私の指定）: 縦長3〜5頭は、発走時刻・距離・斤量・騎手を行の右の欄に3段で置く（3段とも同じ大きさ・同じ色）。
+/* 右の欄（11/05〜、私の指定）: 行の右に空きがある時は、発走時刻・距離・斤量・騎手を行の右の欄に3段で置く（3段とも同じ大きさ・同じ色）。
    欄の左端・幅・文字の大きさはカード全体でそろえる（行ごとに決めると騎手名の長さで欄がずれて見えるため）。
    馬名の場所を優先し、欄の文字を85%まで縮めても入らない時は null を返す（カード全体を3行目の形で描く。行ごとに混ぜない）。
-   index.html が縦長3〜5頭の時だけ呼び、結果を S._info に入れて drawRow に渡す。結果カードは使わない */
+   縦横・頭数・列数では分けず、行の右の空きで決める（11/05、私の指定）。index.html が呼び、結果を S._info に入れて drawRow に渡す。結果カードは使わない */
 function infoPlan(ctx,hs,h,w,S){
   const ip=h*.11, tx0=ip+h*.5+(S._anyUma?ip*.45+h*.44:0)+ip*.8+h*.72+ip*.8; /* drawRow の文字の始まり（行の左端から） */
   const photoW=hs.some(x=>x.photo)?(h-ip*1.4)+ip*.8:0, avail=w-ip-photoW-tx0;
   const s0=Math.round(clamp(h*.13,9,28)), wt=S.boldInfo?700:500, showAw=S.showAgeWeight!==false;
   const m=(t,weight,size)=>{ if(!t) return 0; ctx.font=`${weight} ${size}px ${F.body}`; return ctx.measureText(t).width; };
-  let pw=0, nameW=0;
+  let pw=0, leftW=0;
   hs.forEach(hr=>{ const l=infoLines(hr,'',showAw);
-    pw=Math.max(pw,...l.map(t=>m(t,wt,s0))); nameW=Math.max(nameW,m(hr.name,900,Math.round(clamp(h*.25,11,52)))); });
-  const sep=ip*1.5, room=avail-sep*2-Math.min(nameW,avail*.6), k=pw?Math.min(1,room/pw):1;
+    pw=Math.max(pw,...l.map(t=>m(t,wt,s0)));
+    leftW=Math.max(leftW,m(hr.name,900,Math.round(clamp(h*.25,11,52))),m(hr.raceName,700,Math.round(clamp(h*.125,8,26)*1.08))); });
+  /* 馬名・レース名が今の大きさのまま入り、欄の文字が今の3行目（行の高さの10.8%）より小さくならない時だけ右に置く */
+  const sep=ip*1.5, room=avail-sep*2-Math.min(leftW,avail), k=pw?Math.min(1,room/pw):1;
   if(k<.85) return null;
   return {s:Math.round(s0*k), pw:pw*k, sep, photoW};
 }
@@ -408,7 +410,7 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   const img=hr.photo&&imgs[hr.photo];
   if(img){ const ps=h-ip*1.4, px=right-ps, py=y+(h-ps)/2; const sw=img.naturalWidth, sh=img.naturalHeight, m=Math.min(sw,sh);
     ctx.save(); rr(ctx,px,py,ps,ps,h*.08); ctx.clip(); ctx.drawImage(img,(sw-m)/2,(sh-m)/2,m,m,px,py,ps,ps); ctx.restore(); right=px-ip*.8; }
-  const P=S._info; let infoX=0; /* 右の欄（縦長3〜5頭） */
+  const P=S._info; let infoX=0; /* 右の欄 */
   if(P){ const pr=x+w-ip-P.photoW; infoX=pr-P.pw; right=Math.min(right,pr)-P.pw-P.sep*2; }
   const label=scr||((S.showKuchi && hr.kuchi && hr.kuchi!=='none')?{win:'口取り 当選',wait:'口取り 抽選待ち',lose:'口取り 落選'}[hr.kuchi]:'');
   let inlineBadge=false;

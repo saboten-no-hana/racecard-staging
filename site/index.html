@@ -473,8 +473,8 @@ async function render(){
     ctx.font=`700 ${Math.round(ts*.45)}px ${F.body}`; ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText('出走予定の出資馬を追加してください',W/2,(top+bottom)/2); ctx.textAlign='left';
   } else {
     S._anyUma=hs.some(h=>h.umaban);
-    /* 縦長3〜5頭は発走・騎手を右の欄へ（11/05〜）。1〜2頭・2列・横長と、名前が長くて入らない時は3行目の形 */
-    const info=(S.size!=='16:9'&&!L.flow&&hs.length>=3&&hs.length<=5)?infoPlan(ctx,hs,L.rowH,L.colW,S):null; /* 保存しないよう写し（SD）にだけ付ける */
+    /* 行の右に空きがあれば、発走・騎手を右の欄へ（11/05〜）。縦横・頭数では分けず、入るかどうかで決める。保存しないよう写し（SD）にだけ付ける */
+    const info=infoPlan(ctx,hs,L.rowH,L.colW,S);
     /* 命名馬（10/30〜）: 設定 showNamed（既定オン）。保存される settings には入れない（Set は保存できないため写しに付ける） */
     const SD=S.showNamed!==false&&state.myNamed.length?{...S,_named:new Set(state.myNamed),_info:info}:{...S,_info:info};
     const drawCol=(p,x,y0,colW)=>{ let y2=y0;
