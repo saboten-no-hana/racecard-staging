@@ -440,17 +440,19 @@ function drawRow(ctx,x,y,w,h,hr,T,S,imgs){
   const kuchiInline=inlineBadge&&!scr&&label;
   /* 狭い行の口取りバッジ: クラブ名の右に必ず入るよう、その分クラブ名を縮める（10/19 修正。以前は入る時だけ描いていて、縦長2列ではほぼ出ていなかった） */
   let kbw=0; if(kuchiInline){ ctx.font=`900 ${Math.round(sA)}px ${F.body}`; kbw=ctx.measureText(label).width+Math.round(sA)*1.2; }
-  let awInChip=!!aw&&!kuchiInline;
+  /* 並びはクラブ名 → 性齢 → 口取りバッジ（11/06〜、私の指定。以前はクラブ名 → 口取りバッジ → 性齢） */
+  let awInChip=!!aw;
+  const kbGap=kbw?kbw+sA*.6:0;
   if(club){
-    const textMax=Math.max(20,tx+tw-cx0-sA*1.15-(kbw?kbw+sA*.6:0)), roomWithAw=textMax-awW-awGap;
+    const textMax=Math.max(20,tx+tw-cx0-sA*1.15-kbGap), roomWithAw=textMax-awW-awGap;
     if(awInChip){ ctx.font=`700 ${Math.round(sA)}px ${F.body}`; if(ctx.measureText(club).width*.85>roomWithAw) awInChip=false; }
     const f=fit(ctx,club,700,F.body,sA,awInChip?Math.max(20,roomWithAw):textMax); const cw=ctx.measureText(f.t).width+sA*1.1;
     rr(ctx,cx0,cy,cw,chipH,chipH*.25); ctx.fillStyle=T.chipBg; ctx.fill(); ctx.fillStyle=T.chipFg; ctx.fillText(f.t,cx0+sA*.55,cy+chipH*.5+f.s*.36);
-    chipEnd=cx0+cw; if(kuchiInline) chipEnd=inlineB(cx0+cw+sA*.6)||chipEnd; }
-  else if(kuchiInline) chipEnd=inlineB(tx)||tx;
+    chipEnd=cx0+cw; }
   if(aw){ const ax=chipEnd>tx?chipEnd+awGap:tx;
-    if(ax+awW<=right){ ctx.font=`700 ${awFs}px ${F.body}`; ctx.fillStyle=scr?T.sub:T.fg; ctx.globalAlpha=scr?1:.85; ctx.fillText(aw,ax,cy+chipH*.5+awFs*.36); ctx.globalAlpha=1; }
+    if(ax+awW+kbGap<=right){ ctx.font=`700 ${awFs}px ${F.body}`; ctx.fillStyle=scr?T.sub:T.fg; ctx.globalAlpha=scr?1:.85; ctx.fillText(aw,ax,cy+chipH*.5+awFs*.36); ctx.globalAlpha=1; chipEnd=ax+awW; }
     else awLine=aw; }
+  if(kuchiInline) chipEnd=inlineB(chipEnd>tx?chipEnd+sA*.6:tx)||chipEnd;
   cy+=chipH+g;
   /* 馬名は省略しない（10/30〜、結果カードと同じ drawNameNoCut。以前は入らない時「…」で切っていた） */
   const nm=drawNameNoCut(ctx,hr.name||'（馬名）',sB,tx,cy+sB*.86,tw,scr?T.sub:T.fg);
