@@ -94,7 +94,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visi
 .post-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:-4px}
 .post-tools .hint{margin:0}.post-tools .over{color:#d32f2f;font-weight:700}
 .checks label{display:flex;gap:6px;align-items:center;font-size:14px;cursor:pointer}
-.checks input{width:18px;height:18px;accent-color:var(--accent)}
+.checks input{width:18px;height:18px;flex:none;accent-color:var(--accent)}
 
 button,.btn{font:inherit;font-size:14px;font-weight:700;border-radius:8px;padding:8px 14px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -352,11 +352,13 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
         </div>
       </fieldset>
       <div class="checks">
-        <label><input type="checkbox" id="s-kuchi">口取りの結果を載せる</label>
-        <label><input type="checkbox" id="s-count">頭数を載せる</label>
-        <label><input type="checkbox" id="s-aw">性齢・斤量を載せる</label>
-        <label><input type="checkbox" id="s-named">命名馬を載せる</label>
-        <label><input type="checkbox" id="s-bold">発走時刻・騎手の行を太字にする</label>
+        <label><input type="checkbox" id="s-right">右側の余白が広い場合は、発走時刻・距離・騎手の行を右に回す</label>
+        <label><input type="checkbox" id="s-kuchi">口取り抽選結果表示</label>
+        <label><input type="checkbox" id="s-count">総頭数表示</label>
+        <label><input type="checkbox" id="s-aw">性齢表示</label>
+        <label><input type="checkbox" id="s-wt">斤量表示</label>
+        <label><input type="checkbox" id="s-named">命名馬バッジ表示</label>
+        <label><input type="checkbox" id="s-bold">発走時刻・距離・騎手の行を太字にする</label>
       </div>
       <label class="fld"><span>投稿文（「X(Twitter)に投稿」の投稿画面に入る本文。説明やハッシュタグ等）</span><textarea id="s-post" rows="4"></textarea></label>
       <div class="post-tools"><button type="button" id="s-list">出走一覧を入れる</button><span id="s-len" class="hint" aria-live="polite"></span></div>
@@ -383,7 +385,7 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
 <script>
 (() => {
 /* 出走カード・結果カードで共通の描画部品は card-core.js（10/23〜）。ここでは読み込んで使うだけ */
-const { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, infoPlan, kgText, rangeText, imgCache, loadImg } = window.RCCore;
+const { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, infoPlan, showKg, kgText, rangeText, imgCache, loadImg } = window.RCCore;
 const COLOR_NAMES = Object.keys(COLORS);
 const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
 const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
@@ -404,7 +406,7 @@ function weekendDates(){ // this weekend if today is Sat/Sun, otherwise the comi
   const sun=new Date(sat); sun.setDate(sat.getDate()+1); return [ymd(sat),ymd(sun)];
 }
 function defaults(){ /* 初期状態（サンプル馬は10/18に廃止） */
-  return { settings:{title:'今週の出走予定',post:null,handle:'@your_account',theme:'turf',size:'4:5',showKuchi:true,order:'venue',showCount:true,showAgeWeight:true,showNamed:true}, horses:[] };
+  return { settings:{title:'今週の出走予定',post:null,handle:'@your_account',theme:'turf',size:'4:5',showKuchi:true,order:'venue',showCount:true,showAgeWeight:true,showNamed:true,infoRight:true}, horses:[] };
 }
 
 const KEY='racecard.v2';
@@ -413,6 +415,7 @@ try{ state = JSON.parse(localStorage.getItem(KEY)); }catch(e){ state=null; }
 if(!state || !Array.isArray(state.horses)) state = defaults();
 state.horses = state.horses.filter(h=>!h.isSample); /* 以前のサンプル馬が残っていれば消す */
 state.settings = Object.assign(defaults().settings, state.settings||{});
+if(state.settings.showWeight===undefined) state.settings.showWeight=state.settings.showAgeWeight!==false; /* 「性齢・斤量を載せる」を性齢と斤量に分けた（11/06）。以前の設定を斤量にも引き継ぐ */
 if(['今週末の出走予定','今週末の出資馬出走予定'].includes(state.settings.title)) state.settings.title='今週の出走予定'; /* 旧既定値のまま使っている人は新しい既定値へ（10/18〜「今週の出走予定」） */
 /* 投稿文: post が null ならタイトルと同じ文（タイトルに連動）。旧形式 postText（タイトルの次の行に付ける文）は全文に移す */
 if('postText' in state.settings){ const t=(state.settings.postText||'').trim(); state.settings.post = t && t!=='#一口馬主' ? (state.settings.title||'')+'\n'+t : null; delete state.settings.postText; }
@@ -473,8 +476,9 @@ async function render(){
     ctx.font=`700 ${Math.round(ts*.45)}px ${F.body}`; ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText('出走予定の出資馬を追加してください',W/2,(top+bottom)/2); ctx.textAlign='left';
   } else {
     S._anyUma=hs.some(h=>h.umaban);
-    /* 行の右に空きがあれば、発走・騎手を右の欄へ（11/05〜）。縦横・頭数では分けず、入るかどうかで決める。保存しないよう写し（SD）にだけ付ける */
-    const info=infoPlan(ctx,hs,L.rowH,L.colW,S);
+    /* 行の右に空きがあれば、発走・騎手を右の欄へ（11/05〜）。縦横・頭数では分けず、入るかどうかで決める。
+       設定 infoRight（11/06〜、既定はオン。未設定もオン）でやめられる。保存しないよう写し（SD）にだけ付ける */
+    const info=S.infoRight!==false?infoPlan(ctx,hs,L.rowH,L.colW,S):null;
     /* 命名馬（10/30〜）: 設定 showNamed（既定オン）。保存される settings には入れない（Set は保存できないため写しに付ける） */
     const SD=S.showNamed!==false&&state.myNamed.length?{...S,_named:new Set(state.myNamed),_info:info}:{...S,_info:info};
     const drawCol=(p,x,y0,colW)=>{ let y2=y0;
@@ -628,7 +632,7 @@ function syncSettings(){ const S=state.settings;
   document.querySelectorAll('input[name=theme]').forEach(r=>r.checked=r.value===S.theme);
   document.querySelectorAll('input[name=size]').forEach(r=>r.checked=r.value===S.size);
   document.querySelectorAll('input[name=order]').forEach(r=>r.checked=r.value===S.order);
-  $('#s-kuchi').checked=S.showKuchi; $('#s-count').checked=S.showCount; $('#s-aw').checked=S.showAgeWeight!==false; $('#s-named').checked=S.showNamed!==false; $('#s-bold').checked=!!S.boldInfo; showPostLen(); }
+  $('#s-kuchi').checked=S.showKuchi; $('#s-count').checked=S.showCount; $('#s-aw').checked=S.showAgeWeight!==false; $('#s-wt').checked=showKg(S); $('#s-named').checked=S.showNamed!==false; $('#s-bold').checked=!!S.boldInfo; $('#s-right').checked=S.infoRight!==false; showPostLen(); }
 $('#s-title').addEventListener('input',e=>{state.settings.title=e.target.value; if(state.settings.post==null) $('#s-post').value=e.target.value; schedule();save();showPostLen();});
 $('#s-handle').addEventListener('input',e=>{state.settings.handle=e.target.value;schedule();save();});
 $('#s-post').addEventListener('input',e=>{ const v=e.target.value; state.settings.post = v.trim() ? v : null; save(); showPostLen(); });
@@ -656,7 +660,7 @@ $('#s-post').addEventListener('blur',e=>{ if(state.settings.post==null) e.target
 document.querySelectorAll('input[name=theme]').forEach(r=>r.addEventListener('change',()=>{state.settings.theme=r.value;schedule();save();}));
 document.querySelectorAll('input[name=size]').forEach(r=>r.addEventListener('change',()=>{state.settings.size=r.value;schedule();save();}));
 document.querySelectorAll('input[name=order]').forEach(r=>r.addEventListener('change',()=>{state.settings.order=r.value;schedule();save();}));
-[['#s-kuchi','showKuchi'],['#s-count','showCount'],['#s-aw','showAgeWeight'],['#s-named','showNamed'],['#s-bold','boldInfo']].forEach(([s,k])=>$(s).addEventListener('change',e=>{state.settings[k]=e.target.checked;schedule();save();}));
+[['#s-kuchi','showKuchi'],['#s-count','showCount'],['#s-aw','showAgeWeight'],['#s-wt','showWeight'],['#s-named','showNamed'],['#s-bold','boldInfo'],['#s-right','infoRight']].forEach(([s,k])=>$(s).addEventListener('change',e=>{state.settings[k]=e.target.checked;schedule();save();}));
 
 $('#copy').addEventListener('click',()=>{ const st=$('#status');
   try{
