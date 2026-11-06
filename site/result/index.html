@@ -345,7 +345,7 @@ a.inl{color:var(--accent);font-weight:700}
 
 <script src="silks-shapes.js"></script>
 <script src="clubs.js"></script>
-<script src="card-core.js"></script>
+<script src="card-core.js?v=20261106"></script>
 <script>
 (() => {
 /* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
@@ -664,11 +664,12 @@ document.querySelectorAll('input[name=order]').forEach(r=>r.addEventListener('ch
 function syncCustom(){ const c=state.settings.custom, on=state.settings.theme==='custom';
   $('#custom-box').hidden=!on; $('#c-bg').value=c.bg; $('#c-accent').value=c.accent; $('#c-dim').value=c.dim; $('#c-dim-val').textContent=c.dim+'%';
   $('#c-thumb').hidden=!c.image; if(c.image) $('#c-thumb').src=c.image; $('#c-img-del').hidden=!c.image; $('#c-dim-wrap').hidden=!c.image;
-  $('#c-img-label').textContent=c.image?'背景画像を変える':'背景画像を選ぶ'; syncFg(); }
+  $('#c-img-label').textContent=c.image?'背景画像を変える':'背景画像を選ぶ'; if(c.fg) $('#c-fg').value=c.fg; syncFg(); }
 /* 文字色（11/06〜）: 空なら自動。自動の時は色の欄に今の自動の色を出す。読みにくい組み合わせは注意だけ出す（使えなくはしない） */
 function syncFg(){ const c=state.settings.custom, auto=!c.fg;
-  $('#c-fg').value=customTheme(c).fg; $('#c-fg-mode').textContent=auto?'（自動）':''; $('#c-fg-auto').hidden=auto;
-  const r=auto?null:customReadability(c); $('#c-fg-warn').hidden=!(r&&(r.fg<3||r.sub<2)); }
+  if(auto) $('#c-fg').value=customTheme(c).fg; /* 選んだ色は書き換えない（選んでいる途中の欄を触らない） */
+  $('#c-fg-mode').textContent=auto?'（自動）':''; $('#c-fg-auto').hidden=auto;
+  const r=auto||typeof customReadability!=='function'?null:customReadability(c); $('#c-fg-warn').hidden=!(r&&(r.fg<3||r.sub<2)); }
 $('#c-bg').addEventListener('input',e=>{ state.settings.custom.bg=e.target.value; schedule(); save(); });
 $('#c-accent').addEventListener('input',e=>{ state.settings.custom.accent=e.target.value; schedule(); save(); });
 $('#c-fg').addEventListener('input',e=>{ state.settings.custom.fg=e.target.value; syncFg(); schedule(); save(); });

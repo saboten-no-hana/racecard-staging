@@ -36,7 +36,7 @@ class TestWeb(unittest.TestCase):
         """結果カード（result/）: トップと同じファイルを読む <base>、card-core.js の読み込み順、出走カードの保存データに書き込まないこと"""
         html = open(os.path.join(ROOT, 'result', 'index.html'), encoding='utf-8').read()
         self.assertIn('<base href="../">', html)
-        self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js"'))
+        self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js'))
         self.assertIn("CARD_KEY='racecard.v2'", html)
         self.assertNotRegex(html, r'setItem\(\s*CARD_KEY', '結果カードが racecard.v2 に書き込んでいる')
         self.assertNotIn("setItem('racecard.v2'", html)
@@ -53,9 +53,12 @@ class TestWeb(unittest.TestCase):
 
     def core_names(self, page):
         html = open(os.path.join(ROOT, page), encoding='utf-8').read()
-        self.assertIn('<script src="card-core.js"></script>', html)
-        self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js"'))
-        self.assertLess(html.index('src="silks-shapes.js"'), html.index('src="card-core.js"'))
+        m = re.search(r'<script src="card-core\.js\?v=(\w+)"></script>', html)
+        self.assertTrue(m, f'{page} の card-core.js に ?v= がない')
+        other = open(os.path.join(ROOT, 'result/index.html' if page == 'index.html' else 'index.html'), encoding='utf-8').read()
+        self.assertIn(m.group(0), other, '出走カードと結果カードで card-core.js の ?v= が違う')
+        self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js'))
+        self.assertLess(html.index('src="silks-shapes.js"'), html.index('src="card-core.js'))
         m = re.search(r'const \{([^}]*)\} = window\.RCCore;', html)
         self.assertTrue(m, f'{page} に window.RCCore の読み込みがない')
         need = [n.strip() for n in m.group(1).split(',') if n.strip()]
