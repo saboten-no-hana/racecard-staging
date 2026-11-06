@@ -184,6 +184,9 @@ details.transfer[open]{padding-bottom:12px;display:grid;gap:12px}
 .custom-box{display:grid;gap:10px;border:1px dashed var(--line);border-radius:10px;padding:12px}
 .custom-box .g3c{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .custom-box input[type=range]{width:100%;accent-color:var(--accent)}
+.custom-box .fg-auto{display:flex;align-items:flex-end;min-width:0}
+.custom-box .fg-auto button{padding:6px 10px;font-size:13px}
+.custom-box .fg-warn{color:var(--danger);font-weight:700}
 .bgthumb{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 footer.site-foot{border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
 footer.site-foot .wrap{padding-block:16px 28px}
@@ -281,7 +284,11 @@ a.inl{color:var(--accent);font-weight:700}
         <div class="g3c">
           <label class="fld"><span>背景色</span><input type="color" id="c-bg"></label>
           <label class="fld"><span>アクセント色</span><input type="color" id="c-accent"></label>
+          <label class="fld"><span>文字色 <b id="c-fg-mode"></b></span><input type="color" id="c-fg"></label>
+          <div class="fg-auto"><button type="button" class="ghost" id="c-fg-auto" hidden>自動に戻す</button></div>
         </div>
+        <p class="hint" id="c-fg-hint">文字色は「自動」では背景に合わせて白か黒になります。選ぶと馬名や見出しの色が変わり、灰色の文字はその色から自動で作ります。</p>
+        <p class="hint fg-warn" id="c-fg-warn" hidden>背景との差が小さく、文字が読みにくいかもしれません。</p>
         <div class="photo">
           <img class="bgthumb" id="c-thumb" alt="" hidden>
           <label class="btn" for="c-img" id="c-img-label">背景画像を選ぶ</label>
@@ -343,7 +350,7 @@ a.inl{color:var(--accent);font-weight:700}
 (() => {
 /* 結果カード（10/24〜）。描画の部品は出走カードと共通の card-core.js から読み込み、結果の1行（右端に大きく着順・その上に人気＝B案）だけをここで描く。
    保存データは racecard.result.v1。出走カードの racecard.v2 は読むだけで書き換えない（★と、出走カードに入れた馬を取り込むため） */
-const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawNameNoCut, drawNamedOnSilks, showKg, kgText, rangeText, loadImg } = window.RCCore;
+const { F, CLUBS, COLORS, clubById, WD, THEMES, DEFAULT_CUSTOM, customTheme, customReadability, pad2, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, drawSilks, drawSilksImg, drawBg, venueRanker, entriesOf, GAP, DAY, VEN, layoutOf, drawVenue, drawDay, drawNameNoCut, drawNamedOnSilks, showKg, kgText, rangeText, loadImg } = window.RCCore;
 const COLOR_NAMES = Object.keys(COLORS);
 const BODY_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['ichimonji','一文字（胴と袖）'],['obi','帯'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['yamagata1','山形一文字（胴と袖）'],['yamagataobi','山形帯'],['hishiyamagata','菱山形'],['kyoshi','鋸歯形（胴と袖）'],['tasuki','襷'],['jujitasuki','十字襷'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
 const SLEEVE_PATTERNS = [['plain','無地'],['wa1','一本輪'],['wa2','二本輪'],['wa3','三本輪'],['yamagatawa1','山形一本輪'],['yamagata','山形二本輪'],['yamagata3','山形三本輪'],['hishiyamagata','菱山形'],['tate','縦縞'],['check','格子'],['genroku','元禄'],['diamond','ダイヤモンド'],['uroko','うろこ'],['igeta','井桁絣'],['dots','玉霰'],['stars','星散'],['janome','蛇目散'],['zenigata','銭形散']];
@@ -472,6 +479,7 @@ let outUrl='', HELD=null;
 async function render(){
   const S=state.settings, T=S.theme==='custom'?customTheme(S.custom):(THEMES[S.theme]||THEMES.turf);
   if(S.theme==='custom'&&S.custom&&S.custom.image) await loadImg(S.custom.image);
+  if(S.theme==='custom') syncFg(); /* 背景色・背景画像・暗さが変わった時の自動の色と注意（画像は読み込んだ後に判定できる） */
   const hs=state.horses;
   const txt=[S.title,S.handle,'着番人気頭中止失格取消除外日月火水木金土日付未定出走結果（馬名）牡牝セ',...hs.flatMap(h=>[clubLabel(h),h.name,h.venue,h.raceName,h.jockey,h.surface,h.sexAge])].join('');
   try{ await document.fonts.load(`40px "IPAexGothic"`,txt+'0123456789.–-RSATSUNMONWEDTHUFRI@_m'); }catch(e){}
@@ -656,9 +664,15 @@ document.querySelectorAll('input[name=order]').forEach(r=>r.addEventListener('ch
 function syncCustom(){ const c=state.settings.custom, on=state.settings.theme==='custom';
   $('#custom-box').hidden=!on; $('#c-bg').value=c.bg; $('#c-accent').value=c.accent; $('#c-dim').value=c.dim; $('#c-dim-val').textContent=c.dim+'%';
   $('#c-thumb').hidden=!c.image; if(c.image) $('#c-thumb').src=c.image; $('#c-img-del').hidden=!c.image; $('#c-dim-wrap').hidden=!c.image;
-  $('#c-img-label').textContent=c.image?'背景画像を変える':'背景画像を選ぶ'; }
+  $('#c-img-label').textContent=c.image?'背景画像を変える':'背景画像を選ぶ'; syncFg(); }
+/* 文字色（11/06〜）: 空なら自動。自動の時は色の欄に今の自動の色を出す。読みにくい組み合わせは注意だけ出す（使えなくはしない） */
+function syncFg(){ const c=state.settings.custom, auto=!c.fg;
+  $('#c-fg').value=customTheme(c).fg; $('#c-fg-mode').textContent=auto?'（自動）':''; $('#c-fg-auto').hidden=auto;
+  const r=auto?null:customReadability(c); $('#c-fg-warn').hidden=!(r&&(r.fg<3||r.sub<2)); }
 $('#c-bg').addEventListener('input',e=>{ state.settings.custom.bg=e.target.value; schedule(); save(); });
 $('#c-accent').addEventListener('input',e=>{ state.settings.custom.accent=e.target.value; schedule(); save(); });
+$('#c-fg').addEventListener('input',e=>{ state.settings.custom.fg=e.target.value; syncFg(); schedule(); save(); });
+$('#c-fg-auto').addEventListener('click',()=>{ state.settings.custom.fg=''; syncFg(); schedule(); save(); });
 $('#c-dim').addEventListener('input',e=>{ state.settings.custom.dim=+e.target.value; $('#c-dim-val').textContent=e.target.value+'%'; schedule(); save(); });
 $('#c-img').addEventListener('change',e=>{ const f=e.target.files[0]; if(!f) return; const fr=new FileReader();
   fr.onload=()=>{ const i=new Image(); i.onload=()=>{ const m=1600, sc=Math.min(1,m/Math.max(i.width,i.height)); const c=document.createElement('canvas'); c.width=Math.round(i.width*sc); c.height=Math.round(i.height*sc); c.getContext('2d').drawImage(i,0,0,c.width,c.height);

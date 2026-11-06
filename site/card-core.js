@@ -29,8 +29,9 @@ const THEMES = {
   autumn:{bg:'#6a2e17',bg2:'#2f130a',fg:'#fff5e8',sub:'#e6c7a6',accent:'#f2a93b',accentInk:'#2a1400',row:'rgba(255,238,215,0.08)',rowLine:'rgba(255,215,170,0.17)',chipBg:'rgba(255,238,215,0.16)',chipFg:'#fff5e8',sat:'#bfd8ff',sun:'#ffad9c',halo:'rgba(255,255,255,0.45)'},
   winter:{bg:'#eef3f8',bg2:'#d5e1ed',fg:'#142338',sub:'#4f6178',accent:'#b3303e',accentInk:'#ffffff',row:'rgba(255,255,255,0.74)',rowLine:'rgba(20,35,56,0.12)',chipBg:'#142338',chipFg:'#ffffff',sat:'#2c6cb0',sun:'#b3303e',halo:null}
 };
-/* カスタム背景: 背景色・アクセント色・背景画像から配色を作る */
-const DEFAULT_CUSTOM={bg:'#1d3557',accent:'#f4a261',image:'',dim:45};
+/* カスタム背景: 背景色・アクセント色・背景画像・文字色から配色を作る
+   文字色（fg、11/06〜）は空なら自動（背景の明るさで白か黒）。灰色の文字（sub）は文字色と背景を混ぜて作る。クラブ名の欄・バッジの文字は自動のまま */
+const DEFAULT_CUSTOM={bg:'#1d3557',accent:'#f4a261',image:'',dim:45,fg:''};
 function hexRgb(h){ h=(h||'#000').replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join(''); const n=parseInt(h,16)||0; return [n>>16&255,n>>8&255,n&255]; }
 function rgbHex(r,g,b){ return '#'+[r,g,b].map(v=>Math.round(clamp(v,0,255)).toString(16).padStart(2,'0')).join(''); }
 function mix(a,b,t){ const A=hexRgb(a),B=hexRgb(b); return rgbHex(A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t); }
@@ -38,12 +39,27 @@ function luminance(h){ const c=hexRgb(h).map(v=>{ v/=255; return v<=.03928?v/12.
 function customTheme(c){
   c={...DEFAULT_CUSTOM,...(c||{})};
   const dark=!!c.image || luminance(c.bg)<.4;
-  const fg=dark?'#f6f4ee':'#17191d', base=c.image?'#000000':c.bg;
+  const autoFg=dark?'#f6f4ee':'#17191d', fg=/^#[0-9a-f]{6}$/i.test(c.fg||'')?c.fg:autoFg, base=c.image?'#000000':c.bg;
   const acc=c.accent, accInk=luminance(acc)>.45?'#141414':'#ffffff';
   return { bg:c.bg, bg2:mix(c.bg,'#000000',dark?.45:.08), fg, sub:mix(fg,base,dark?.3:.38), accent:acc, accentInk:accInk,
     row:dark?'rgba(255,255,255,0.08)':'rgba(255,255,255,0.7)', rowLine:dark?'rgba(255,255,255,0.14)':'rgba(0,0,0,0.12)',
-    chipBg:dark?'rgba(255,255,255,0.16)':'#17191d', chipFg:dark?fg:'#ffffff',
+    chipBg:dark?'rgba(255,255,255,0.16)':'#17191d', chipFg:dark?autoFg:'#ffffff',
     sat:dark?'#a9c9ff':'#1f56c4', sun:dark?'#ffa7a0':'#c62828', halo:dark?'rgba(255,255,255,0.45)':null, custom:c };
+}
+/* カスタムの文字の読みやすさ（11/06〜）: 行の下地（背景＋行の塗り）に対する文字色・灰色の文字のコントラスト比（小さい方）。
+   背景画像は平均の色を暗さの分だけ黒に寄せて判定（画像の一部が明るい場合は分からない） */
+function contrast(a,b){ const A=luminance(a),B=luminance(b); return (Math.max(A,B)+.05)/(Math.min(A,B)+.05); }
+const _avgCache={};
+function imageAvgHex(src){ if(_avgCache[src]) return _avgCache[src]; const img=imgCache[src]; if(!img||!img.naturalWidth) return null;
+  try{ const n=24, cv=document.createElement('canvas'); cv.width=n; cv.height=n; const x=cv.getContext('2d'); x.drawImage(img,0,0,n,n);
+    const d=x.getImageData(0,0,n,n).data; let r=0,g=0,b=0; for(let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; } const k=d.length/4;
+    return _avgCache[src]=rgbHex(r/k,g/k,b/k); }catch(e){ return null; } }
+function customReadability(c){
+  c={...DEFAULT_CUSTOM,...(c||{})}; const T=customTheme(c), dark=!!c.image||luminance(c.bg)<.4;
+  let bgs=[T.bg,T.bg2];
+  if(c.image){ const a=imageAvgHex(c.image); if(!a) return null; bgs=[mix(a,'#000000',(c.dim??45)/100)]; }
+  const under=bgs.map(b=>mix(b,'#ffffff',dark?.08:.7));
+  return { fg:Math.min(...under.map(b=>contrast(T.fg,b))), sub:Math.min(...under.map(b=>contrast(T.sub,b))) };
 }
 const pad2 = n => String(n).padStart(2,'0');
  /* 先週までの馬 */
@@ -511,5 +527,5 @@ function rangeText(horses){
 const imgCache={};
 function loadImg(src){ if(imgCache[src]) return Promise.resolve(imgCache[src]); return new Promise(r=>{ const i=new Image(); i.onload=()=>{imgCache[src]=i;r(i);}; i.onerror=()=>r(null); i.src=src; }); }
 
-window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, infoPlan, infoLines, drawNameNoCut, showKg, NAMED_LABEL, namedBadgeW, drawNamedBadge, drawNamedOnSilks, kgText, rangeText, imgCache, loadImg };
+window.RCCore = { IPA, F, CLUBS, COLORS, clubById, SIZES, WD, WD_EN, WAKU, DEFAULT_SILKS, THEMES, DEFAULT_CUSTOM, hexRgb, rgbHex, mix, luminance, customTheme, contrast, imageAvgHex, customReadability, pad2, STATUS_LABEL, runCount, clamp, parseDate, clubLabel, silksSpec, silksImgSrc, silksHex, rr, ls, fit, mulberry, SHAPES, OUTLINE, BODY_CLIP, SEAM, SLEEVE_AXIS, SPAN_KEYS, ALIAS, ARM_FROM_REF, _p2d, p2d, p2dAll, star, drawRefPattern, drawSleeveMotif, drawSilks, drawSilksImg, drawBg, VENUE_ORDER, EAST_MAIN, WEST_MAIN, num, venueRanker, entriesOf, GAP, DAY, VEN, colUnits, bandsOf, ROW_PREF, headerTop, flowCols, layoutOf, bandUnits, splitRows, drawVenue, drawDay, drawRow, infoPlan, infoLines, drawNameNoCut, showKg, NAMED_LABEL, namedBadgeW, drawNamedBadge, drawNamedOnSilks, kgText, rangeText, imgCache, loadImg };
 })();
