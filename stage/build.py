@@ -10,10 +10,11 @@ site/（本番 racecard のあるコミットの中身をそのまま写した�
 - manifest: ホーム画面に追加した時に本番と見分けられる名前
 - data/races.json: 指定があれば本番の最新に差し替える（JRA にはアクセスしない）
 - data/results.json: 本番の最新があれば差し替え、なければ stage/sample/results.json（実際の結果。10/25 日曜の全場・クラブ馬96頭。結果カードの確認用）
+- data/status.json: 本番の最新があれば差し替える（出馬表の「集計中」の表示の確認用。11/18〜）
 - data/retired.json: 本番の最新があれば差し替え、なければ stage/sample/retired.json（実際の登録抹消。9/24〜10/25 の347頭。10/29 の調査で取ったもの。登録抹消のバナーの確認用）
 
 書き換えが効かなかった時（本番のコードの形が変わった時）は失敗にする。
-使い方: python3 stage/build.py site _site [--races races.json] [--results results.json] [--retired retired.json]
+使い方: python3 stage/build.py site _site [--races races.json] [--results results.json] [--retired retired.json] [--status status.json]
 """
 import argparse
 import json
@@ -44,6 +45,7 @@ def main():
     ap.add_argument('--races')
     ap.add_argument('--results')
     ap.add_argument('--retired')
+    ap.add_argument('--status')
     a = ap.parse_args()
     src, out = Path(a.src), Path(a.out)
     if out.exists():
@@ -145,9 +147,14 @@ def main():
     elif (out / 'data' / 'retired.json').exists():
         tnote = '反映したコミットのもの'
 
+    # 8. 出馬表の集計の状態（「集計中・○時ごろ載る見込み」の表示用、11/18〜）。なければ写したコミットのもの
+    snote = '反映したコミットのもの' if (out / 'data' / 'status.json').exists() else 'なし'
+    if okjson(a.status):
+        shutil.copyfile(a.status, out / 'data' / 'status.json'); snote = '本番の最新'
+
     (out / '.nojekyll').touch()
     print(f'元のコミット: {source}')
-    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}、results.json は{rnote}、retired.json は{tnote}')
+    print(f'保存キーの書き換え {keys} か所、ページ {pages} 件、races.json は{note}、results.json は{rnote}、retired.json は{tnote}、status.json は{snote}')
 
 
 if __name__ == '__main__':

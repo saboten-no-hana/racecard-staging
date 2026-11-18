@@ -1,10 +1,12 @@
 /* Service Worker（ホーム画面に追加して使う時・電波が弱い時のため、2026-10-19〜）
    - ページ本体（出走カード・結果カード）・JS・出馬表（races.json）・結果（results.json）: ネットワーク優先（更新をすぐ反映）。つながらない時だけ保存済みのものを使う
    - フォント・勝負服・アイコン: 保存済みを優先（めったに変わらない）。中身を差し替えた時は STATIC の番号を上げる
+   - card-core.js はページと同じ「?v=番号」つきで保存する。card-core.js の番号を上げた時は、下の PRECACHE_PAGES の番号もそろえる
+     （tools/test_web.py が確かめる。sw.js が変わると入れ直しになり、新しい card-core.js を保存し直す。11/18〜）
    利用者のデータ（★・入力内容）は扱わない（localStorage のまま） */
 const STATIC = 'racecard-static-v1';
-const PAGES = 'racecard-pages-v1';
-const PRECACHE_PAGES = ['./', 'index.html', 'result/', 'clubs.js', 'silks-shapes.js', 'qr.js', 'card-core.js', 'manifest.webmanifest'];  // result/ は結果カード（10/24〜）
+const PAGES = 'racecard-pages-v2';  // v2（11/18〜）: v1 に残っている番号なしの古い card-core.js を、入れ直しの時に消すため
+const PRECACHE_PAGES = ['./', 'index.html', 'result/', 'clubs.js', 'silks-shapes.js', 'qr.js', 'card-core.js?v=20261106', 'manifest.webmanifest'];  // result/ は結果カード（10/24〜）
 const PRECACHE_STATIC = ['fonts/ipaexg.ttf', 'icon.svg'];
 
 self.addEventListener('install', e => {
@@ -31,7 +33,9 @@ self.addEventListener('fetch', e => {
   e.respondWith(fetch(req).then(res => {
     if (res.ok) { const cp = res.clone(); caches.open(PAGES).then(c => c.put(req, cp)); }
     return res;
-  }).catch(() => caches.match(req, {ignoreSearch: true}).then(hit => hit || (req.mode === 'navigate'
+  // つながらない時は、まず同じ URL（?v= の番号も同じ）で保存したものを使い、なければ ? 以降を無視して探す（11/18〜。以前は ? 以降を無視して
+  // 最初に見つかったものを返していたため、番号なしで保存した古い card-core.js が新しいページと組み合わさることがあった）
+  }).catch(() => caches.match(req).then(hit => hit || caches.match(req, {ignoreSearch: true})).then(hit => hit || (req.mode === 'navigate'
     // 保存がない時は、結果カードの中なら保存済みの結果カード、それ以外は出走カードを返す（10/26〜。以前は結果カードでも出走カードを返していた）
     ? caches.match(/\/result\/?$/.test(url.pathname) || url.pathname.includes('/result/') ? 'result/' : 'index.html')
     : Response.error()))));

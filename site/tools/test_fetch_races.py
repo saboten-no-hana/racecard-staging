@@ -366,6 +366,56 @@ class TestModes(Base):
             self.assertTrue(jra.requests)
             self.assertEqual(data['horses'][0]['umaban'], '1')
 
+    def last_day_races(self, upd):
+        """開催の最終日（今日）と前日のクラブ馬が入った races.json"""
+        def h(hid, name, d, venue, r, jockey, status=''):
+            return {'key': f'{d}|{venue}|{r}|{hid}', 'horseId': hid, 'name': name, 'clubId': 'carrot', 'date': d, 'venue': venue, 'r': r,
+                    'time': '15:00', 'raceName': 'テスト特別', 'grade': '', 'cls': '2勝クラス', 'surface': '芝', 'dist': 1600,
+                    'jockey': jockey, 'waku': '1', 'umaban': '1', 'sexAge': '牡4', 'weight': '57.0', 'status': status}
+        return {'source': 'JRAホームページ 出馬表', 'updated': upd,
+                'days': [{'date': day(-1), 'venues': ['東京']}, {'date': day(0), 'venues': ['東京', '京都']}],
+                'horses': [h('2021000001', 'キノウノウマ', day(-1), '東京', 1, '騎手 1'),
+                           h('2021000011', 'キョウノウマ', day(0), '東京', 11, '騎手 1'),
+                           h('2021000012', 'キョウノウマニ', day(0), '東京', 11, '騎手 X')]}
+
+    def test_last_day_refresh(self):
+        """開催の最終日（翌日に開催がなく新しい開催日もない日）は、当日の出馬表を読み直して取消・除外・騎手を反映する（11/18〜）。
+        ほかの日の馬は残し、名義の確かめ直し・馬のページは読まない。クラブ馬のいない場（京都）は読まない"""
+        jra = FakeJRA([{'date': day(0), 'venue_code': '05', 'r': 11, 'umaban': True,
+                        'horses': [('2021000011', 'キョウノウマ', CARROT, '取消'), ('2021000012', 'キョウノウマニ', CARROT, ''), ('2019000099', 'タニンノウマ', '山田 太郎', '')]},
+                       {'date': day(0), 'venue_code': '08', 'r': 1, 'umaban': True, 'horses': [('2019000098', 'キョウトノウマ', '山田 太郎', '')]}])
+        old = (datetime.now(JST) - timedelta(days=1)).isoformat(timespec='minutes')
+        code, data, _ = self.run_main(jra, ['--mode', 'umaban', '--start', '00:00', '--until', '23:59', '--interval', '0'],
+                                      races=self.last_day_races(old), summary=True)
+        self.assertEqual(code, 0)
+        by = {x['horseId']: x for x in data['horses']}
+        self.assertEqual(len(by), 3)                                   # 前日の馬も残る
+        self.assertEqual(by['2021000011']['status'], '取消')
+        self.assertEqual(by['2021000012']['jockey'], '騎手 2')         # 騎手の変更
+        self.assertEqual(by['2021000001']['jockey'], '騎手 1')
+        self.assertNotEqual(data['updated'], old)
+        self.assertEqual(len(jra.requests), 3)                         # トップ＋東京のレース一覧・全レースまとめ
+        self.assertFalse([c for c in jra.requests if c.startswith(('pw01dde', 'pw01dud'))])
+        self.assertIn('当日の出馬表だけ読み直した', open(os.path.join(self.tmp.name, 'summary.md'), encoding='utf-8').read())
+
+    def test_last_day_refresh_no_change(self):
+        """当日の出馬表に変化がなければ races.json は書き換えない"""
+        jra = FakeJRA([{'date': day(0), 'venue_code': '05', 'r': 11, 'umaban': True,
+                        'horses': [('2021000011', 'キョウノウマ', CARROT, ''), ('2021000012', 'キョウノウマニ', CARROT, '')]}])
+        races = self.last_day_races('2026-01-01T10:00+09:00')
+        races['horses'][2]['jockey'] = '騎手 2'
+        code, data, _ = self.run_main(jra, ['--mode', 'umaban', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=races)
+        self.assertEqual((code, data['updated'], len(jra.requests)), (0, '2026-01-01T10:00+09:00', 3))
+
+    def test_no_meeting_today_reads_top_only(self):
+        """今日も翌日も開催がなく新しい開催日もない平日は、今までどおりトップだけ読んで終わる"""
+        jra = FakeJRA([{'date': day(-1), 'venue_code': '05', 'r': 1, 'umaban': True, 'horses': [('2021000001', 'キノウノウマ', CARROT, '')]}])
+        races = self.last_day_races('2026-01-01T10:00+09:00')
+        races['horses'] = races['horses'][:1]
+        races['days'] = races['days'][:1]
+        code, data, _ = self.run_main(jra, ['--mode', 'umaban', '--start', '00:00', '--until', '23:59', '--interval', '0'], races=races)
+        self.assertEqual((code, len(jra.requests), data['updated']), (0, 1, '2026-01-01T10:00+09:00'))
+
     def test_confirm_second_run_skips(self):
         """出走確定の見張りが2回目に動いた時（今日15時以降に先の開催日を取得済み）は JRA にアクセスしない（10/26〜）"""
         jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': [('2021000001', 'クラブウマ', CARROT, '')]}])

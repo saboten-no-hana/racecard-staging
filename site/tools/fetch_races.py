@@ -23,6 +23,7 @@ data/cache.json に記録して週をまたいで使い回す（個人馬主の�
       # --watch-until まで確認し、何も載らなければ終了（トップを数回読むだけ）
   python3 tools/fetch_races.py --mode umaban --start 10:05 --until 12:00
       # 翌日分の馬番つき出馬表が出るまで5分おきに確認して取得。翌日に開催がなく、新しい開催日もなければ何もしない
+      # ただし今日が開催日（開催のまとまりの最終日）なら、今日の出馬表だけ1回読み、取消・除外・騎手・斤量を反映する（11/18〜、refresh_today）
   確認は軽く（トップと対象の開催1つ＝最大3リクエスト）行い、出ていたら全体を取得する。
   出馬表は少しずつ載ることがあるので、全体を取得しても揃っていなければ5分後に取り直す。
 
@@ -343,6 +344,10 @@ def write_summary(mode, state, code, count, ctx):
         L += ['', '| クラブ | 頭数 |', '|---|---:|']
         L += [f"| {names.get(k, k)} | {v} |" for k, v in sorted(last['hits'].items(), key=lambda kv: -kv[1])]
         L += ['', f"一致しなかったクラブらしい名義: {'、'.join(last['miss']) or 'なし'}"]
+    elif ctx.get('refresh'):
+        rf = ctx['refresh']
+        L.append(f"- 開催の最終日なので、当日の出馬表だけ読み直した（{'、'.join(rf['meetings'])}／クラブ馬 {rf['total']}頭）")
+        L.append(f"- 取消・除外・騎手・斤量の変更: {'、'.join(rf['changes']) or 'なし'}")
     elif ctx.get('done'):
         L.append(f"- 出馬表は取得していない（{ctx['done']}。2回目の見張りなので JRA にはアクセスしていない）")
     else:
@@ -466,6 +471,58 @@ def estimate_pages(f, meetings, club_of, regist, seen, today):
                 n += sum(1 for h in hs if club_of.get(h['horseId']) and seen.get(h['horseId']) and days_between(seen[h['horseId']], rdate) >= STALE_DAYS)
     return n
 
+REFRESH_KEYS = ('status', 'jockey', 'weight')   # 当日の読み直しで更新する項目（出走取消・競走除外、騎手の変更、斤量の変更）
+
+
+def refresh_today(f, meetings, today, ctx):
+    """開催のまとまりの最終日（翌日に開催がなく、新しい開催日もない日。ふだんの日曜・3日間開催の月曜）に、その日の出馬表を1回読み、
+    races.json のその日のクラブ馬の 取消・除外・騎手・斤量 だけを更新する（11/18〜）。
+    以前はこの日の馬番の見張りが何も読まずに終わっていたため、前日10時の取得の後に出た取消（11/15 京都10R など）が出走カードに入らなかった。
+    races.json のほかの日の馬（前日の土曜など）は残す（全体を取り直すと土曜分が消え、結果の取り直しなどに使えなくなるため）。
+    名義の確かめ直し・馬のページは読まない。リクエストは クラブ馬の出る場ごとに2（レース一覧・全レースまとめ）＝ふだん4〜6。返り値は 'skip'"""
+    try:
+        with open(OUT, encoding='utf-8') as fp:
+            races = json.load(fp)
+    except (OSError, ValueError):
+        print('races.json がないので当日の読み直しはしない')
+        return 'skip'
+    mine = [h for h in races.get('horses', []) if h.get('date') == today]
+    venues = {h.get('venue') for h in mine}
+    meetings = [m for m in meetings if m['venue'] in venues]   # クラブ馬の出る場だけ読む
+    if not meetings:
+        print(f'{today} の開催にクラブ馬がいないので何もしない')
+        return 'skip'
+    got = {}
+    for mt in meetings:
+        _, rs = read_meeting(f, mt)
+        for race in rs:
+            for h in race['horses']:
+                got[(h['horseId'], race.get('date', mt['date']))] = h
+    changes = []
+    for x in mine:
+        h = got.get((x.get('horseId'), x.get('date')))
+        if not h:
+            continue
+        for k in REFRESH_KEYS:
+            # 騎手・斤量は空で上書きしない（読み取りの失敗で消さないため）。取消・除外は空に戻ることもそのまま写す
+            if h.get(k, '') != x.get(k, '') and (h.get(k) or k == 'status'):
+                changes.append(f"{x.get('venue')}{x.get('r')}R {x.get('name')}: {k} {x.get(k, '')!r} → {h.get(k, '')!r}")
+                x[k] = h.get(k, '')
+    print(f"{today} の出馬表を読み直した（{'・'.join(m['venue'] for m in meetings)}、クラブ馬 {len(mine)}頭）", flush=True)
+    for c in changes:
+        print('  変更:', c, flush=True)
+    if changes:
+        races['updated'] = datetime.now(JST).isoformat(timespec='minutes')
+        with open(OUT, 'w', encoding='utf-8') as fp:
+            json.dump(races, fp, ensure_ascii=False, indent=1)
+        print(f'data/races.json を更新（{len(changes)}件）', flush=True)
+    else:
+        print('変更なし', flush=True)
+    ctx['refresh'] = {'meetings': [f"{m['date']} {m['venue']}" for m in meetings], 'total': len(mine), 'changes': changes}
+    ctx['ok'] = True
+    return 'skip'
+
+
 def save_records(cache, seen, club_of):
     """名義の記録（cache.json: 馬ID → クラブID か空文字）と、クラブ馬が最後に載った日（seen.json）を書く"""
     json.dump(cache, open(CACHE, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'), sort_keys=True)
@@ -521,6 +578,10 @@ def attempt(f, clubs, mode, ctx):
         check = [m for m in meetings if m['date'] == tomorrow]
         if not check:
             if not new_dates:
+                todays = [m for m in meetings if m['date'] == today]
+                if todays:
+                    # 開催のまとまりの最終日（ふだんの日曜）: 翌日の馬番はないが、その日の取消・除外・騎手の変更を反映する（11/18〜）
+                    return refresh_today(f, todays, today, ctx)
                 print(f'{tomorrow} の開催も新しい開催日もないので何もしない')
                 return 'skip'
             print('新しい開催日があるので取得:', ', '.join(new_dates))

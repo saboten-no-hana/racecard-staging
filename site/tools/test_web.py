@@ -10,6 +10,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE = shutil.which('node')
 
 
+def read(*p):
+    with open(os.path.join(ROOT, *p), encoding='utf-8') as fp:
+        return fp.read()
+
+
 @unittest.skipUnless(NODE, 'node がない')
 class TestWeb(unittest.TestCase):
     def check(self, src, name):
@@ -20,27 +25,27 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(r.returncode, 0, f'{name}: {r.stderr}')
 
     def test_syntax(self):
-        html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
+        html = read('index.html')
         scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
         self.assertTrue(scripts)
         for i, s in enumerate(scripts):
             self.check(s, f'index.html の <script> {i + 1}')
-        rhtml = open(os.path.join(ROOT, 'result', 'index.html'), encoding='utf-8').read()
+        rhtml = read('result', 'index.html')
         for i, s in enumerate(re.findall(r'<script>(.*?)</script>', rhtml, re.S)):
             self.check(s, f'result/index.html の <script> {i + 1}')
         for n in ('qr.js', 'sw.js', 'clubs.js', 'card-core.js'):
-            self.check(open(os.path.join(ROOT, n), encoding='utf-8').read(), n)
-        json.load(open(os.path.join(ROOT, 'manifest.webmanifest'), encoding='utf-8'))
+            self.check(read(n), n)
+        json.loads(read('manifest.webmanifest'))
 
     def test_result_page(self):
         """結果カード（result/）: トップと同じファイルを読む <base>、card-core.js の読み込み順、出走カードの保存データに書き込まないこと"""
-        html = open(os.path.join(ROOT, 'result', 'index.html'), encoding='utf-8').read()
+        html = read('result', 'index.html')
         self.assertIn('<base href="../">', html)
         self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js'))
         self.assertIn("CARD_KEY='racecard.v2'", html)
         self.assertNotRegex(html, r'setItem\(\s*CARD_KEY', '結果カードが racecard.v2 に書き込んでいる')
         self.assertNotIn("setItem('racecard.v2'", html)
-        sw = open(os.path.join(ROOT, 'sw.js'), encoding='utf-8').read()
+        sw = read('sw.js')
         self.assertIn("'result/'", sw)
         # 古いキャッシュを消すのはこのページの分だけ（同じドメインのテスト環境 racecard-stg-… は残す。10/26〜）
         self.assertIn("/^racecard-(?!stg-)/.test(k)", sw)
@@ -52,11 +57,15 @@ class TestWeb(unittest.TestCase):
                 self.core_names(page)
 
     def core_names(self, page):
-        html = open(os.path.join(ROOT, page), encoding='utf-8').read()
+        html = read(page)
         m = re.search(r'<script src="card-core\.js\?v=(\w+)"></script>', html)
         self.assertTrue(m, f'{page} の card-core.js に ?v= がない')
-        other = open(os.path.join(ROOT, 'result/index.html' if page == 'index.html' else 'index.html'), encoding='utf-8').read()
+        other = read('result/index.html' if page == 'index.html' else 'index.html')
         self.assertIn(m.group(0), other, '出走カードと結果カードで card-core.js の ?v= が違う')
+        # sw.js が保存する card-core.js もページと同じ番号つき（11/18〜。番号なしで保存した古い部品をオフラインで返さないため）
+        sw = read('sw.js')
+        self.assertIn("'card-core.js?v=%s'" % m.group(1), sw, 'sw.js の PRECACHE_PAGES の card-core.js の ?v= がページと違う')
+        self.assertNotIn("'card-core.js'", sw, 'sw.js が番号なしの card-core.js を保存している')
         self.assertLess(html.index('src="clubs.js"'), html.index('src="card-core.js'))
         self.assertLess(html.index('src="silks-shapes.js"'), html.index('src="card-core.js'))
         m = re.search(r'const \{([^}]*)\} = window\.RCCore;', html)

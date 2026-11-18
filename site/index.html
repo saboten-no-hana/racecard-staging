@@ -310,7 +310,7 @@ footer.site-foot a{color:var(--accent);font-weight:700;overflow-wrap:anywhere}
       <h2>画像の設定</h2>
       <div class="g g2">
         <label class="fld"><span>タイトル</span><input id="s-title" type="text"></label>
-        <label class="fld"><span>アカウント名</span><input id="s-handle" type="text" placeholder="@your_account"></label>
+        <label class="fld"><span>アカウント名</span><input id="s-handle" type="text" placeholder="例）@your_account"></label>
       </div>
       <fieldset class="fld"><legend>デザイン</legend>
         <div class="seg" id="s-theme">
@@ -413,7 +413,7 @@ function weekendDates(){ // this weekend if today is Sat/Sun, otherwise the comi
   const sun=new Date(sat); sun.setDate(sat.getDate()+1); return [ymd(sat),ymd(sun)];
 }
 function defaults(){ /* 初期状態（サンプル馬は10/18に廃止） */
-  return { settings:{title:'今週の出走予定',post:null,handle:'@your_account',theme:'turf',size:'4:5',showKuchi:true,order:'venue',showCount:true,showAgeWeight:true,showNamed:true,infoRight:true}, horses:[] };
+  return { settings:{title:'今週の出走予定',post:null,handle:'',theme:'turf',size:'4:5',showKuchi:true,order:'venue',showCount:true,showAgeWeight:true,showNamed:true,infoRight:true}, horses:[] };
 }
 
 const KEY='racecard.v2';
@@ -429,6 +429,9 @@ if('postText' in state.settings){ const t=(state.settings.postText||'').trim(); 
 if(typeof state.settings.post!=='string'||!state.settings.post.trim()) state.settings.post=null;
 if(state.settings.theme==='snow') state.settings.theme='winter'; /* 雪は廃止（降雪時は開催中止になるため）→ 冬 */
 if(state.settings.size==='1:1') state.settings.size='4:5'; /* 正方形は廃止（10/24）→ 縦長 */
+/* アカウント名の既定値は空（11/18〜）。以前の既定値「@your_account」のまま使っている人は空にする（気付かずに画像に載っている例が多かったため） */
+if(state.settings.handle==='@your_account') state.settings.handle='';
+delete state.settings._anyUma; /* 描画用の値が以前は保存データに入っていた（11/18〜は描画の写しにだけ付ける） */
 state.myHorses = Array.isArray(state.myHorses)?state.myHorses:[];
 state.myNames = state.myNames||{};
 state.myPending = Array.isArray(state.myPending)?state.myPending:[]; /* 馬名だけで★予約中（出馬表に出たら馬IDの★へ） */
@@ -483,12 +486,13 @@ async function render(){
   if(!hs.length){
     ctx.font=`700 ${Math.round(ts*.45)}px ${F.body}`; ctx.fillStyle=T.sub; ctx.textAlign='center'; ctx.fillText('出走予定の出資馬を追加してください',W/2,(top+bottom)/2); ctx.textAlign='left';
   } else {
-    S._anyUma=hs.some(h=>h.umaban);
+    /* 馬番の欄を空けるか（1頭でも馬番があれば全行に枠を取る）。保存される settings には入れず、描画用の写し（SA）に付ける（11/18〜） */
+    const SA={...S,_anyUma:hs.some(h=>h.umaban)};
     /* 行の右に空きがあれば、発走・騎手を右の欄へ（11/05〜）。縦横・頭数では分けず、入るかどうかで決める。
        設定 infoRight（11/06〜、既定はオン。未設定もオン）でやめられる。保存しないよう写し（SD）にだけ付ける */
-    const info=S.infoRight!==false?infoPlan(ctx,hs,L.rowH,L.colW,S):null;
+    const info=S.infoRight!==false?infoPlan(ctx,hs,L.rowH,L.colW,SA):null;
     /* 命名馬（10/30〜）: 設定 showNamed（既定オン）。保存される settings には入れない（Set は保存できないため写しに付ける） */
-    const SD=S.showNamed!==false&&state.myNamed.length?{...S,_named:new Set(state.myNamed),_info:info}:{...S,_info:info};
+    const SD=S.showNamed!==false&&state.myNamed.length?{...SA,_named:new Set(state.myNamed),_info:info}:{...SA,_info:info};
     const drawCol=(p,x,y0,colW)=>{ let y2=y0;
       p.forEach(e=>{ if(e.t==='day'){ const dh=L.rowH*DAY; drawDay(ctx,x,y2,colW,dh,e,T); y2+=dh; } else if(e.t==='venue'){ const vh=L.rowH*VEN; drawVenue(ctx,x,y2,colW,vh,e,T); y2+=vh; } else { drawRow(ctx,x,y2,colW,L.rowH,e.h,T,SD,imgs); y2+=L.rowH*(1+GAP); } });
       return y2; };
@@ -833,7 +837,7 @@ function renderState(){ const el=$('#p-state'); if(!RACES){ el.hidden=true; retu
   const st=raceState(); el.hidden=false; el.classList.toggle('wait',!!st.wait);
   el.innerHTML=`<p>${st.html}</p>`+(st.reload?'<button type="button" id="p-reload">最新を読み込む</button>':''); }
 $('#p-state').addEventListener('click',e=>{ if(e.target.id==='p-reload'){ e.target.disabled=true; e.target.textContent='読み込み中…'; loadRaces(); } });
-async function loadRaces(){
+async function loadRaces(quiet){ /* quiet: 自動の読み直し（読めなかった時は今の表示のまま） */
   const U=$('#p-upd');
   try{
     const r=await fetch('data/races.json',{cache:'no-cache'}); if(!r.ok) throw new Error(r.status);
@@ -848,10 +852,16 @@ async function loadRaces(){
     const n=syncFromData(); if(n){ renderList(); save(); U.textContent+=`／出走馬${n}頭を最新の内容に更新`; }
     renderState(); renderPicker(); schedule();
   }catch(e){
+    if(quiet&&RACES) return;
     U.textContent='';
     $('#p-list').innerHTML='<p class="pempty">今週の出馬表データを読み込めませんでした。「＋ 馬を追加」から手入力できます。</p>';
   }
 }
+/* 発表待ち・集計中・馬番の反映中（「最新を読み込む」が出ている間）は、開いたままでも5分ごとに出馬表を読み直す（11/18〜。結果カードと同じく画面が見えている時だけ）。
+   文字の欄などに入力中の時は読み直さない（一覧の描き直しで入力が途切れないように）。読むのは公開ページの races.json・status.json だけ */
+setInterval(()=>{ if(document.visibilityState!=='visible'||!RACES) return;
+  const a=document.activeElement; if(a&&a.matches&&a.matches('input:not([type]),input[type=text],input[type=number],input[type=date],input[type=time],textarea,select')) return;
+  if(raceState().reload) loadRaces(true); },5*60e3);
 $('#p-club').addEventListener('change',e=>{ try{ localStorage.setItem('racecard.pclub',e.target.value); }catch(_){} });
 
 /* ---------- ★の引き継ぎ ---------- */

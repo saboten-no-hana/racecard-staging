@@ -264,7 +264,7 @@ a.inl{color:var(--accent);font-weight:700}
       <h2>画像の設定</h2>
       <div class="g g2">
         <label class="fld"><span>タイトル</span><input id="s-title" type="text"></label>
-        <label class="fld"><span>アカウント名</span><input id="s-handle" type="text" placeholder="@your_account"></label>
+        <label class="fld"><span>アカウント名</span><input id="s-handle" type="text" placeholder="例）@your_account"></label>
       </div>
       <fieldset class="fld"><legend>デザイン</legend>
         <div class="seg" id="s-theme">
@@ -450,7 +450,7 @@ function readCard(){ try{ const s=JSON.parse(localStorage.getItem(CARD_KEY)); re
 let CARD=readCard();
 function defaults(){
   const cs=CARD.settings||{}; /* 初めて開いた時は、出走カードのアカウント名・デザイン・サイズなどを引き継ぐ */
-  return { settings:{title:'出走結果',post:null,handle:cs.handle||'@your_account',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size==='16:9'?'16:9':'4:5',order:cs.order||'venue',
+  return { settings:{title:'出走結果',post:null,handle:cs.handle&&cs.handle!=='@your_account'?cs.handle:'',theme:THEMES[cs.theme]||cs.theme==='custom'?cs.theme:'turf',size:cs.size==='16:9'?'16:9':'4:5',order:cs.order||'venue',
     showCount:cs.showCount!==false,showTally:true,showAgeWeight:cs.showAgeWeight!==false,showWeight:showKg(cs),showNamed:cs.showNamed!==false,boldInfo:!!cs.boldInfo,skipPostGuide:!!cs.skipPostGuide,custom:{...DEFAULT_CUSTOM,...(cs.custom||{})}}, horses:[] };
 }
 let state;
@@ -461,6 +461,8 @@ if(!state||!Array.isArray(state.horses)) state=defaults();
 state.settings.custom={...DEFAULT_CUSTOM,...(state.settings.custom||{})};
 if(typeof state.settings.post!=='string'||!state.settings.post.trim()) state.settings.post=null;
 if(state.settings.size!=='16:9') state.settings.size='4:5'; /* 正方形は廃止（10/24）→ 縦長 */
+/* アカウント名の既定値は空（11/18〜、出走カードと同じ）。以前の既定値「@your_account」のまま使っている人は空にする */
+if(state.settings.handle==='@your_account') state.settings.handle='';
 let saveT, pngBlob=null;
 function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{ localStorage.setItem(KEY,JSON.stringify(state)); }catch(e){ try{ localStorage.setItem(KEY,JSON.stringify({...state,settings:{...state.settings,custom:{...state.settings.custom,image:''}}})); }catch(_){} } },300); }
 const myHorses=()=>Array.isArray(CARD.myHorses)?CARD.myHorses:[];
