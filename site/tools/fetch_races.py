@@ -24,6 +24,8 @@ data/cache.json に記録して週をまたいで使い回す（個人馬主の�
   python3 tools/fetch_races.py --mode umaban --start 10:05 --until 12:00
       # 翌日分の馬番つき出馬表が出るまで5分おきに確認して取得。翌日に開催がなく、新しい開催日もなければ何もしない
       # ただし今日が開催日（開催のまとまりの最終日）なら、今日の出馬表だけ1回読み、取消・除外・騎手・斤量を反映する（11/18〜、refresh_today）
+  --start まで MAX_WAIT 分より長く待つことになる時（定期実行が大きく遅れて日付をまたいだ時など）は、
+  JRA にアクセスせずに終わる（11/24〜。以前は翌日の --start まで待ってジョブの時間切れになっていた）
   確認は軽く（トップと対象の開催1つ＝最大3リクエスト）行い、出ていたら全体を取得する。
   出馬表は少しずつ載ることがあるので、全体を取得しても揃っていなければ5分後に取り直す。
 
@@ -49,6 +51,10 @@ BASE = 'https://www.jra.go.jp'
 UA = 'Mozilla/5.0 (compatible; racecard/1.0; +https://github.com/saboten-no-hana/racecard)'
 JST = timezone(timedelta(hours=9))
 WAIT = 2.0
+MAX_WAIT = 240   # 見張りの開始（--start）まで、これ（分）より長く待つことになる時は見張らずに終わる（11/24〜）。
+                 # いつもの待ちは 出走確定 13:45 起動 → 15:45 の120分・馬番 08:45 起動 → 10:05 の80分。
+                 # 13:45 の定期実行が10時間以上遅れて日付をまたぐと、翌日の 15:45 まで待つことになり（11/24 は924分）、
+                 # ジョブの上限（345分）で打ち切られて失敗のメールが届いていた
 VENUES = {'01': '札幌', '02': '函館', '03': '福島', '04': '新潟', '05': '東京', '06': '中山', '07': '中京', '08': '京都', '09': '阪神', '10': '小倉'}
 
 # ---------------------------------------------------------------- clubs
@@ -288,6 +294,15 @@ def main():
         until = at_jst(arg('--until', '23:59'))
         watch = at_jst(arg('--watch-until')) if arg('--watch-until') else until
         wait = (start - datetime.now(JST)).total_seconds()
+        if wait > MAX_WAIT * 60:
+            # 定期実行が大きく遅れて日付をまたいだ時など。その日の見張りは外からの起動（cron-job.org）の回が済ませている前提で、
+            # JRA にアクセスせずに正常終了する（11/24〜）
+            late = f'{start:%H:%M} まで{int(wait // 60)}分待つことになる（起動が遅れて日付をまたいだなど）'
+            print(f'{late}ので見張らない（JRA にはアクセスしない）', flush=True)
+            print(f'::notice::{late}ので見張らずに終了（JRA にはアクセスしていない）', flush=True)
+            ctx['late'] = late
+            write_summary(mode, 'skip', 0, 0, ctx)
+            return 0
         if wait > 0:
             print(f'{start:%H:%M} まで待機（{int(wait // 60)}分）', flush=True)
             time.sleep(wait)
@@ -348,6 +363,8 @@ def write_summary(mode, state, code, count, ctx):
         rf = ctx['refresh']
         L.append(f"- 開催の最終日なので、当日の出馬表だけ読み直した（{'、'.join(rf['meetings'])}／クラブ馬 {rf['total']}頭）")
         L.append(f"- 取消・除外・騎手・斤量の変更: {'、'.join(rf['changes']) or 'なし'}")
+    elif ctx.get('late'):
+        L.append(f"- 出馬表は取得していない（{ctx['late']}ので見張らない。JRA にはアクセスしていない）")
     elif ctx.get('done'):
         L.append(f"- 出馬表は取得していない（{ctx['done']}。2回目の見張りなので JRA にはアクセスしていない）")
     else:

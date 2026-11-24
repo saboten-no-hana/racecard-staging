@@ -432,6 +432,44 @@ class TestModes(Base):
         self.assertTrue(jra.requests)
         self.assertEqual(len(data['horses']), 12)
 
+    def frozen_now(self, hhmm):
+        """main() の中の「今」を、今日の hh:mm に固定する（起動の遅れを再現するため）"""
+        h, m = map(int, hhmm.split(':'))
+        t = datetime.now(JST).replace(hour=h, minute=m, second=0, microsecond=0)
+        class Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return t.astimezone(tz) if tz else t.replace(tzinfo=None)
+        return mock.patch.object(fr, 'datetime', Frozen)
+
+    def test_late_schedule_skips(self):
+        """定期実行が遅れて日付をまたいだ時（11/24 は 13:45 の回が 0:20 に起動）は、翌日の開始まで待たずに JRA にアクセスせず終わる（11/24〜）"""
+        for args in (['--mode', 'confirm', '--start', '15:45', '--until', '18:30', '--watch-until', '16:35'],
+                     ['--mode', 'umaban', '--start', '10:05', '--until', '12:00']):
+            with self.subTest(mode=args[1]):
+                jra = FakeJRA([{'date': day(2), 'venue_code': '05', 'r': 1, 'umaban': False, 'horses': [('2021000001', 'クラブウマ', CARROT, '')]}])
+                def no_sleep(s):   # 待とうとしたらその場で失敗にする（以前の動きだと止まらなくなるため）
+                    raise AssertionError(f'{s / 60:.0f}分待とうとした')
+                with self.frozen_now('00:20'), mock.patch.object(fr.time, 'sleep', no_sleep):
+                    code, _, _ = self.run_main(jra, args + ['--interval', '0'], summary=True)
+                self.assertEqual((code, jra.requests), (0, []))
+                self.assertIn('見張らない', self.log)
+                self.assertIn('JRA にはアクセスしていない', open(os.path.join(self.tmp.name, 'summary.md'), encoding='utf-8').read())
+
+    def test_usual_wait_still_runs(self):
+        """いつもの起動（13:45 → 15:45 の120分待ち、08:45 → 10:05 の80分待ち）は、これまで通り待ってから読む"""
+        for hhmm, args, minutes in (('13:45', ['--mode', 'confirm', '--start', '15:45', '--until', '18:30'], 120),
+                                    ('08:45', ['--mode', 'umaban', '--start', '10:05', '--until', '12:00'], 80)):
+            with self.subTest(mode=args[1]):
+                jra = FakeJRA([{'date': day(1), 'venue_code': '05', 'r': r, 'umaban': True, 'horses': [(f'20210001{r:02d}', f'ウマ{r}', CARROT, '')]} for r in range(1, 13)])
+                slept = []
+                with self.frozen_now(hhmm), mock.patch.object(fr.time, 'sleep', slept.append):
+                    code, data, _ = self.run_main(jra, args + ['--interval', '0'], races={'days': [], 'horses': []})
+                self.assertEqual(code, 0)
+                self.assertEqual(slept[0], minutes * 60)
+                self.assertTrue(jra.requests)
+                self.assertEqual(len(data['horses']), 12)
+
     def test_format_error(self):
         """出馬表トップにリンクはあるのに形式が読めない → exit 1"""
         jra = FakeJRA([])
