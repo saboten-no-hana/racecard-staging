@@ -2,6 +2,9 @@ name: テスト環境に反映
 # site/（本番 racecard のコミットを写したもの）を、本番と混ざらないように書き換えて GitHub Pages に出す。
 # 出馬表（races.json）・結果（results.json）・登録抹消（retired.json）・集計の状態（status.json）は本番リポジトリから取る（結果・登録抹消がまだなければ stage/sample の見本）。JRA にはアクセスしない。
 # 定期実行は races.json を本番の最新にそろえるため（11:20・18:20 JST）。
+# 組み立て（build）と公開（deploy）はジョブを分ける（11/25〜）。同じジョブで続けると、deploy-pages が
+# アップロード直後（0.3〜0.8秒後）に成果物を探して「No artifacts named "github-pages"」で失敗することが増えたため
+# （11/22・11/24〜。GitHub 側の成果物の一覧の反映の遅れ。GitHub の Pages の標準のひな形と同じ形）。
 on:
   push:
     branches: [main]
@@ -16,11 +19,8 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -47,5 +47,12 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
